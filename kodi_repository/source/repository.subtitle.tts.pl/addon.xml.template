@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="repository.subtitle.tts.pl"
+       name="Lektor PL — repozytorium emillo1983"
+       version="1.0.4"
+       provider-name="emillo1983">
+  <extension point="xbmc.addon.repository" name="Lektor PL">
+    <dir>
+      <info compressed="false">{{BASE_URL}}/addons.xml</info>
+      <checksum>{{BASE_URL}}/addons.xml.md5</checksum>
+      <datadir zip="true">{{BASE_URL}}/zips/</datadir>
+      <hashes>false</hashes>
+    </dir>
+  </extension>
+  <extension point="xbmc.addon.metadata">
+    <summary lang="pl_PL">Aktualizacje dodatku Lektor PL autorstwa emillo1983</summary>
+    <description lang="pl_PL">Publiczne repozytorium GitHub dodatku czytającego napisy w Kodi.</description>
+    <disclaimer lang="pl_PL">Do syntezy mowy wymagany jest własny klucz API ElevenLabs.</disclaimer>
+    <platform>all</platform>
+    <license>MIT</license>
+    <news>1.0.4 — aktualizacje przeniesione do publicznego repozytorium GitHub.</news>
+  </extension>
+</addon>

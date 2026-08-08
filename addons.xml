@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addons>
+  <addon id="repository.subtitle.tts.pl"
+         name="Lektor PL — repozytorium emillo1983"
+         version="1.0.4"
+         provider-name="emillo1983">
+    <extension point="xbmc.addon.repository" name="Lektor PL">
+      <dir>
+        <info compressed="false">https://raw.githubusercontent.com/emillo1983123-crypto/emillo1983/main/addons.xml</info>
+        <checksum>https://raw.githubusercontent.com/emillo1983123-crypto/emillo1983/main/addons.xml.md5</checksum>
+        <datadir zip="true">https://raw.githubusercontent.com/emillo1983123-crypto/emillo1983/main/zips/</datadir>
+        <hashes>false</hashes>
+      </dir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+      <summary lang="pl_PL">Aktualizacje dodatku Lektor PL autorstwa emillo1983</summary>
+      <description lang="pl_PL">Publiczne repozytorium GitHub dodatku czytającego napisy w Kodi.</description>
+      <disclaimer lang="pl_PL">Do syntezy mowy wymagany jest własny klucz API ElevenLabs.</disclaimer>
+      <platform>all</platform>
+      <license>MIT</license>
+      <news>1.0.4 — aktualizacje przeniesione do publicznego repozytorium GitHub.</news>
+    </extension>
+  </addon>
+  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="0.7.1" provider-name="emillo1983">
+    <requires>
+      <import addon="xbmc.python" version="3.0.1"/>
+    </requires>
+    <extension point="xbmc.service" library="service.py"/>
+    <extension point="xbmc.python.script" library="default.py">
+      <provides>executable</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+      <summary lang="pl_PL">Czyta na głos napisy filmu</summary>
+      <summary lang="en_GB">Reads movie subtitles aloud</summary>
+      <description lang="pl_PL">Lektor napisów z głosem ElevenLabs, bez Termuksa. Zawiera domyślnie włączony filtr rodzinny łagodzący wulgaryzmy.</description>
+      <description lang="en_GB">Subtitle narration using ElevenLabs without Termux. Includes a family-friendly profanity filter enabled by default.</description>
+      <disclaimer lang="pl_PL">Klucz API jest maskowany w interfejsie, ale Kodi zapisuje ustawienia lokalnie bez szyfrowania.</disclaimer>
+      <platform>all</platform>
+      <license>MIT</license>
+    </extension>
+  </addon>
+</addons>

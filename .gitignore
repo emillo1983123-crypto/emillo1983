@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+kodi_repository/.build/
+kodi_repository/public/
+*.log
+*.pid

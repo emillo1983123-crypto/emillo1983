@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<settings version="1">
+  <section id="service.subtitle.tts.pl">
+    <category id="general" label="32000" help="32100">
+      <group id="1" label="32001">
+        <setting id="tts_enabled" type="boolean" label="32010" help="32110">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="family_mode" type="boolean" label="32011" help="32111">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="filter_level" type="string" label="32012" help="32112">
+          <level>0</level>
+          <default>family</default>
+          <constraints>
+            <options>
+              <option label="32013">strong</option>
+              <option label="32014">family</option>
+              <option label="32015">strict</option>
+            </options>
+          </constraints>
+          <dependencies>
+            <dependency type="enable" setting="family_mode">true</dependency>
+          </dependencies>
+          <control type="list" format="string"><heading>32012</heading></control>
+        </setting>
+        <setting id="subtitle_offset_ms" type="integer" label="32016" help="32116">
+          <level>1</level>
+          <default>0</default>
+          <constraints><minimum>-5000</minimum><step>100</step><maximum>5000</maximum></constraints>
+          <control type="slider" format="integer"><popup>true</popup></control>
+        </setting>
+        <setting id="min_gap_ms" type="integer" label="32017" help="32117">
+          <level>1</level>
+          <default>150</default>
+          <constraints><minimum>0</minimum><step>50</step><maximum>2000</maximum></constraints>
+          <control type="slider" format="integer"><popup>true</popup></control>
+        </setting>
+        <setting id="show_status" type="boolean" label="32018" help="32118">
+          <level>1</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+      </group>
+    </category>
+    <category id="speech" label="32030" help="32130">
+      <group id="2" label="32031">
+        <setting id="api_key" type="string" label="32020" help="32120">
+          <level>0</level>
+          <default/>
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"><heading>32020</heading><hidden>true</hidden></control>
+        </setting>
+        <setting id="voice_id" type="string" label="32021" help="32121">
+          <level>0</level>
+          <default>pNInz6obpgDQGcFmaJgB</default>
+          <constraints><allowempty>false</allowempty></constraints>
+          <control type="edit" format="string"><heading>32021</heading></control>
+        </setting>
+        <setting id="model_id" type="string" label="32022" help="32122">
+          <level>1</level>
+          <default>eleven_flash_v2_5</default>
+          <constraints>
+            <options>
+              <option label="32023">eleven_flash_v2_5</option>
+              <option label="32024">eleven_multilingual_v2</option>
+            </options>
+          </constraints>
+          <control type="list" format="string"><heading>32022</heading></control>
+        </setting>
+      </group>
+    </category>
+  </section>
+</settings>

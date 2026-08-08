@@ -1,0 +1,122 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Kodi Lektor PL\n"
+"Language: pl_PL\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgctxt "#32000"
+msgid "General"
+msgstr "Ogólne"
+
+msgctxt "#32001"
+msgid "Operation"
+msgstr "Działanie"
+
+msgctxt "#32010"
+msgid "Enable subtitle reader"
+msgstr "Włącz lektora napisów"
+
+msgctxt "#32011"
+msgid "Family mode"
+msgstr "Tryb rodzinny"
+
+msgctxt "#32012"
+msgid "Filtering level"
+msgstr "Poziom filtrowania"
+
+msgctxt "#32013"
+msgid "Strong profanity only"
+msgstr "Tylko mocne wulgaryzmy"
+
+msgctxt "#32014"
+msgid "Family (recommended)"
+msgstr "Rodzinny (zalecany)"
+
+msgctxt "#32015"
+msgid "Strict"
+msgstr "Ścisły"
+
+msgctxt "#32016"
+msgid "Subtitle timing correction (ms)"
+msgstr "Korekta czasu napisów (ms)"
+
+msgctxt "#32017"
+msgid "Minimum pause between lines (ms)"
+msgstr "Minimalna przerwa między kwestiami (ms)"
+
+msgctxt "#32018"
+msgid "Show status notifications"
+msgstr "Pokazuj komunikaty stanu"
+
+msgctxt "#32020"
+msgid "API key"
+msgstr "Klucz API ElevenLabs"
+
+msgctxt "#32021"
+msgid "Voice ID"
+msgstr "Identyfikator głosu"
+
+msgctxt "#32022"
+msgid "Model"
+msgstr "Model głosu"
+
+msgctxt "#32023"
+msgid "Flash v2.5 — fast"
+msgstr "Flash v2.5 — szybki"
+
+msgctxt "#32024"
+msgid "Multilingual v2 — high quality"
+msgstr "Multilingual v2 — wysoka jakość"
+
+msgctxt "#32030"
+msgid "Voice and API"
+msgstr "Głos i API"
+
+msgctxt "#32031"
+msgid "ElevenLabs"
+msgstr "ElevenLabs"
+
+msgctxt "#32100"
+msgid "General reader and filtering settings"
+msgstr "Ogólne ustawienia lektora i filtra"
+
+msgctxt "#32110"
+msgid "Turns subtitle speech on or off"
+msgstr "Włącza lub wyłącza odczytywanie napisów"
+
+msgctxt "#32111"
+msgid "Softens profanity before speech"
+msgstr "Łagodzi wulgaryzmy przed odczytaniem"
+
+msgctxt "#32112"
+msgid "Strict mode may also alter ambiguous words"
+msgstr "Tryb ścisły może zmieniać także słowa wieloznaczne"
+
+msgctxt "#32116"
+msgid "Moves narration earlier or later relative to the movie"
+msgstr "Przesuwa lektora wcześniej lub później względem filmu"
+
+msgctxt "#32117"
+msgid "Avoids starting two spoken lines at exactly the same time"
+msgstr "Zapobiega uruchamianiu dwóch kwestii dokładnie w tej samej chwili"
+
+msgctxt "#32118"
+msgid "Shows important reader status and error messages"
+msgstr "Pokazuje ważne komunikaty o stanie i błędach lektora"
+
+msgctxt "#32120"
+msgid "Masked on screen, but Kodi stores it locally without encryption"
+msgstr "Maskowany na ekranie, ale Kodi zapisuje go lokalnie bez szyfrowania"
+
+msgctxt "#32121"
+msgid "ElevenLabs voice identifier; use the add-on menu to choose a voice"
+msgstr "Identyfikator głosu ElevenLabs; głos można wybrać z menu dodatku"
+
+msgctxt "#32122"
+msgid "Flash is faster; Multilingual usually sounds more natural"
+msgstr "Flash jest szybszy; Multilingual zwykle brzmi naturalniej"
+
+msgctxt "#32130"
+msgid "Speech provider configuration"
+msgstr "Konfiguracja dostawcy głosu"

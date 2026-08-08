@@ -1,0 +1,11 @@
+0.7.1
+- Uwzględnianie opóźnienia napisów ustawionego w odtwarzaczu Kodi.
+- Reset kolejki lektora po przewinięciu filmu.
+- Prywatne repozytorium aktualizacji w sieci domowej.
+
+0.7.0
+- Bezpośrednie połączenie z ElevenLabs — Termux i mostek nie są potrzebne.
+- Odtwarzanie WAV przez mikser Kodi.
+- Filtr rodzinny włączony domyślnie.
+- Wyszukiwanie i odczyt tekstowych napisów SRT, VTT, ASS/SSA i MicroDVD.
+- Test głosu i wybór głosu z menu dodatku.
