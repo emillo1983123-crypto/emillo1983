@@ -6,7 +6,7 @@ domyślnie włączony filtr rodzinny łagodzący wulgaryzmy.
 
 ## Instalacja w Kodi 20 lub 21
 
-1. Pobierz [pakiet repozytorium Kodi](https://raw.githubusercontent.com/emillo1983123-crypto/emillo1983/main/repository.subtitle.tts.pl-1.0.4.zip).
+1. Pobierz [pakiet repozytorium Kodi](https://raw.githubusercontent.com/emillo1983123-crypto/emillo1983/main/repository.subtitle.tts.pl-1.0.5.zip).
 2. W Kodi włącz `Ustawienia → System → Dodatki → Nieznane źródła`.
 3. Wybierz `Dodatki → Zainstaluj z pliku ZIP` i wskaż pobrany plik.
 4. Wybierz `Zainstaluj z repozytorium → Lektor PL — repozytorium emillo1983`.
