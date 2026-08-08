@@ -429,12 +429,14 @@ foreach ($AddonRoot in $AddonRoots) {
 $ManifestBlocks = @()
 foreach ($Addon in ($BuiltAddons | Sort-Object Id)) {
     $WithoutDeclaration = $Addon.RawManifest -replace '^\s*<\?xml[^?]*\?>\s*', ''
-    $Indented = "  " + ($WithoutDeclaration.Trim() -replace "\r?\n", "`r`n  ")
+    # addons.xml musi miec identyczne bajty w Windows i po publikacji przez
+    # Git. Stale LF zapobiega zmianie sumy MD5 przez core.autocrlf.
+    $Indented = "  " + ($WithoutDeclaration.Trim() -replace "\r?\n", "`n  ")
     $ManifestBlocks += $Indented
 }
-$AddonsXml = "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?>`r`n<addons>`r`n"
-$AddonsXml += ($ManifestBlocks -join "`r`n")
-$AddonsXml += "`r`n</addons>`r`n"
+$AddonsXml = "<?xml version=`"1.0`" encoding=`"UTF-8`" standalone=`"yes`"?>`n<addons>`n"
+$AddonsXml += ($ManifestBlocks -join "`n")
+$AddonsXml += "`n</addons>`n"
 $AddonsXmlPath = Join-Path $PublicRoot "addons.xml"
 Write-Utf8NoBom -Path $AddonsXmlPath -Text $AddonsXml
 
