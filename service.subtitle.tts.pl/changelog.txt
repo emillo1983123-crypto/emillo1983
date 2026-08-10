@@ -1,3 +1,11 @@
+0.8.1 (2026-08-10)
+- Napisy ekranowe są domyślnie ukrywane dopiero przy poprawnym odtwarzaniu lektora.
+- Profile narracji: klasyczny, ciepły dokumentalny, naturalny i dynamiczny.
+- Regulacja tempa od 70 do 120 procent; domyślnie spokojne 95 procent.
+- Długie kwestie nie są już obcinane po 500 znakach i są składane w pełny WAV.
+- Mały bufor gotowych kwestii ogranicza pomijanie dialogów bez tworzenia opóźnionego ogona.
+- Tryb oszczędny zachowuje znaczące powtórzenia i usuwa tylko oczywiste artefakty mowy.
+
 0.8.0 (2026-08-10)
 - Naturalizacja interpunkcji i pomijanie kwestii zawierających wyłącznie znaki.
 - Stabilne identyfikatory kwestii: brak powtórek przy nakładających się napisach.

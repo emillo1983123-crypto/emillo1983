@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import unittest
+import wave
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -11,7 +12,12 @@ sys.path.insert(0, LIB)
 
 from family_filter import soften
 from cue_tracker import ActiveCueTracker
-from speech import ElevenLabsClient, SpeechError
+from speech import (
+    MAX_TOTAL_TEXT_CHARS,
+    ElevenLabsClient,
+    SpeechCancelled,
+    SpeechError,
+)
 from subtitle_parser import clean_text, parse_subtitle
 from text_normalizer import compress_for_economy, normalize_for_speech
 
@@ -161,7 +167,10 @@ class TextNormalizerTests(unittest.TestCase):
             "bardzo dobrze bardzo dobrze."
         )
         compressed = compress_for_economy(source)
-        self.assertEqual(compressed, "nie, nie wiem, ale mamy 12 biletów. bardzo dobrze.")
+        self.assertEqual(
+            compressed,
+            "nie, nie wiem, ale mamy 12 biletów. bardzo dobrze bardzo dobrze.",
+        )
         self.assertLess(len(compressed), len(normalize_for_speech(source)))
         self.assertEqual(compress_for_economy(compressed), compressed)
 
@@ -175,11 +184,11 @@ class TextNormalizerTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertEqual(compress_for_economy(value), value)
 
-    def test_economy_removes_fillers_stutters_and_direct_short_repetitions(self):
+    def test_economy_removes_fillers_stutters_and_single_word_duplicates(self):
         self.assertEqual(compress_for_economy("Eee, um, hmm, to to był był plan."), "to był plan.")
         self.assertEqual(
             compress_for_economy("idziemy do domu, idziemy do domu!"),
-            "idziemy do domu!",
+            "idziemy do domu, idziemy do domu!",
         )
 
 
@@ -234,13 +243,182 @@ class SpeechTests(unittest.TestCase):
             self.assertEqual(
                 payload["voice_settings"],
                 {
-                    "stability": 0.55,
+                    "stability": 0.70,
                     "similarity_boost": 0.75,
                     "style": 0.0,
                     "use_speaker_boost": False,
-                    "speed": 1.05,
+                    "speed": 0.95,
                 },
             )
+            self.assertNotIn("pitch", payload)
+            self.assertNotIn("pitch", payload["voice_settings"])
+
+    def test_voice_profiles_are_named_archetypes_without_pitch(self):
+        expected = {
+            "classic": (0.70, 0.75, 0.0, False),
+            "natural": (0.55, 0.75, 0.05, True),
+            "warm": (0.65, 0.80, 0.10, True),
+            "dynamic": (0.40, 0.70, 0.25, True),
+        }
+        for profile, values in expected.items():
+            with self.subTest(profile=profile):
+                client = ElevenLabsClient(
+                    "secret",
+                    "voice",
+                    "model",
+                    "cache",
+                    speech_speed_percent=95,
+                    voice_profile=profile,
+                )
+                settings = client._speech_options()["voice_settings"]
+                self.assertEqual(
+                    (
+                        settings["stability"],
+                        settings["similarity_boost"],
+                        settings["style"],
+                        settings["use_speaker_boost"],
+                    ),
+                    values,
+                )
+                self.assertEqual(settings["speed"], 0.95)
+                self.assertNotIn("pitch", settings)
+
+        fallback = ElevenLabsClient("secret", "voice", "model", "cache", voice_profile="person-name")
+        self.assertEqual(fallback.voice_profile, "classic")
+
+    def test_speed_is_clamped_and_profile_and_speed_change_cache_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+
+            def request(url, data=None):
+                calls.append(json.loads(data.decode("utf-8")))
+                return b"\x00\x00" * 240
+
+            high = ElevenLabsClient(
+                "secret",
+                "voice",
+                "model",
+                directory,
+                speech_speed_percent=999,
+                voice_profile="warm",
+            )
+            high._request = request
+            first = high.synthesize("Ten sam tekst.")
+            self.assertEqual(calls[-1]["voice_settings"]["speed"], 1.2)
+
+            equivalent = ElevenLabsClient(
+                "secret",
+                "voice",
+                "model",
+                directory,
+                speech_speed_percent=120,
+                voice_profile="warm",
+            )
+            equivalent._request = request
+            same = equivalent.synthesize("Ten sam tekst.")
+            self.assertTrue(same.cached)
+            self.assertEqual(same.path, first.path)
+
+            low = ElevenLabsClient(
+                "secret",
+                "voice",
+                "model",
+                directory,
+                speech_speed_percent=-10,
+                voice_profile="warm",
+            )
+            low._request = request
+            slower = low.synthesize("Ten sam tekst.")
+            self.assertEqual(calls[-1]["voice_settings"]["speed"], 0.7)
+            self.assertNotEqual(slower.path, first.path)
+
+            natural = ElevenLabsClient(
+                "secret",
+                "voice",
+                "model",
+                directory,
+                speech_speed_percent=120,
+                voice_profile="natural",
+            )
+            natural._request = request
+            changed_profile = natural.synthesize("Ten sam tekst.")
+            self.assertNotEqual(changed_profile.path, first.path)
+            self.assertEqual(len(calls), 3)
+
+    def test_text_over_500_characters_is_not_silently_truncated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = ElevenLabsClient("secret", "voice", "model", directory)
+            requests = []
+
+            def request(url, data=None):
+                requests.append(json.loads(data.decode("utf-8")))
+                return b"\x00\x00" * 240
+
+            client._request = request
+            text = " ".join("słowo%d" % index for index in range(120))
+            first = client.synthesize(text)
+            second = client.synthesize(text + " inne zakończenie")
+            self.assertGreater(len(text), 500)
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(requests[0]["text"], text)
+            self.assertEqual(requests[1]["text"], text + " inne zakończenie")
+            self.assertNotEqual(first.path, second.path)
+
+    def test_long_text_is_chunked_and_all_pcm_is_joined_without_text_loss(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = ElevenLabsClient("secret", "voice", "model", directory)
+            requests = []
+
+            def request(url, data=None):
+                requests.append(json.loads(data.decode("utf-8")))
+                return b"\x00\x00" * 240
+
+            client._request = request
+            text = " ".join("Zdanie numer %d." % index for index in range(900))
+            result = client.synthesize(text)
+            self.assertGreater(len(requests), 1)
+            self.assertTrue(all(len(item["text"]) <= 9000 for item in requests))
+            self.assertEqual(" ".join(item["text"] for item in requests), text)
+            with wave.open(result.path, "rb") as audio:
+                self.assertEqual(audio.getnframes(), 240 * len(requests))
+            self.assertAlmostEqual(result.duration, (240 * len(requests)) / 24000.0)
+
+            request_count = len(requests)
+            cached = client.synthesize(text)
+            self.assertTrue(cached.cached)
+            self.assertEqual(len(requests), request_count)
+
+    def test_pathological_text_is_rejected_without_paid_requests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = ElevenLabsClient("secret", "voice", "model", directory)
+            requests = []
+            client._request = lambda url, data=None: requests.append((url, data))
+
+            with self.assertRaises(SpeechError):
+                client.synthesize("a" * (MAX_TOTAL_TEXT_CHARS + 1))
+
+            self.assertEqual(requests, [])
+
+    def test_chunk_generation_can_be_cancelled_after_seek(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = ElevenLabsClient("secret", "voice", "model", directory)
+            state = {"cancelled": False, "requests": 0}
+
+            def request(url, data=None):
+                state["requests"] += 1
+                state["cancelled"] = True
+                return b"\x00\x00" * 240
+
+            client._request = request
+            text = " ".join("Zdanie %d." % index for index in range(900))
+            with self.assertRaises(SpeechCancelled):
+                client.synthesize(
+                    text,
+                    cancelled=lambda: state["cancelled"],
+                )
+
+            self.assertEqual(state["requests"], 1)
+            self.assertEqual(os.listdir(directory), [])
 
     def test_economy_off_keeps_context_and_context_specific_cache(self):
         with tempfile.TemporaryDirectory() as directory:

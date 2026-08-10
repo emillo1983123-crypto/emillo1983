@@ -76,12 +76,40 @@ msgctxt "#32025"
 msgid "Save ElevenLabs credits"
 msgstr ""
 
+msgctxt "#32026"
+msgid "Hide on-screen subtitles while the reader is active"
+msgstr ""
+
+msgctxt "#32027"
+msgid "Narrator profile"
+msgstr ""
+
+msgctxt "#32028"
+msgid "Classic — low and calm"
+msgstr ""
+
+msgctxt "#32029"
+msgid "Warm documentary"
+msgstr ""
+
 msgctxt "#32030"
 msgid "Voice and API"
 msgstr ""
 
 msgctxt "#32031"
 msgid "ElevenLabs"
+msgstr ""
+
+msgctxt "#32032"
+msgid "Speech speed (%)"
+msgstr ""
+
+msgctxt "#32033"
+msgid "Natural"
+msgstr ""
+
+msgctxt "#32034"
+msgid "Dynamic"
 msgstr ""
 
 msgctxt "#32100"
@@ -132,8 +160,20 @@ msgctxt "#32125"
 msgid "Shortens only redundant speech, avoids repeated generations and omits request context; Flash uses fewer credits"
 msgstr ""
 
+msgctxt "#32126"
+msgid "Keeps the subtitle file selected for narration, but hides its text over the movie"
+msgstr ""
+
+msgctxt "#32127"
+msgid "Selects the narration style. A low tone depends on the legal ElevenLabs voice selected in your account; profiles do not imitate real people."
+msgstr ""
+
 msgctxt "#32130"
 msgid "Speech provider configuration"
+msgstr ""
+
+msgctxt "#32132"
+msgid "Adjusts narration speed from 70 to 120 percent. The recommended calm setting is 95 percent."
 msgstr ""
 
 msgctxt "#32200"

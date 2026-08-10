@@ -25,6 +25,14 @@ from auto_subtitles import (  # noqa: E402
 from speech import ElevenLabsClient, SpeechError  # noqa: E402
 
 
+VOICE_PROFILES = (
+    ("classic", 32028, 95),
+    ("warm", 32029, 95),
+    ("natural", 32033, 100),
+    ("dynamic", 32034, 105),
+)
+
+
 def notify(message, error=False):
     icon = xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO
     xbmcgui.Dialog().notification("Kodi Lektor PL", message, icon, 6000)
@@ -44,11 +52,16 @@ def test_voice(addon):
         voice_id=settings.getString("voice_id").strip(),
         model_id=settings.getString("model_id").strip(),
         cache_dir=cache_dir,
+        speech_speed_percent=settings.getInt("speech_speed_percent") or 95,
+        voice_profile=settings.getString("voice_profile").strip() or "classic",
     )
     dialog = xbmcgui.DialogProgress()
     dialog.create("Kodi Lektor PL", "Tworzę próbkę głosu…")
     try:
-        result = client.synthesize("Dzień dobry. Lektor napisów działa prawidłowo.")
+        result = client.synthesize(
+            "Dzień dobry. Lektor napisów działa prawidłowo.",
+            economy_mode=settings.getBool("economy_mode"),
+        )
         dialog.close()
         xbmc.playSFX(result.path, False)
         notify("Odtwarzam próbkę. Jeśli jej nie słychać, wyłącz passthrough i ustaw dźwięki GUI na Zawsze.")
@@ -87,6 +100,20 @@ def choose_voice(addon):
     except Exception:
         dialog.close()
         notify("Nie udało się pobrać głosów. Sprawdź klucz API.", True)
+
+
+def choose_voice_profile(addon):
+    """Apply a safe narration archetype and its recommended starting speed."""
+
+    settings = addon.getSettings()
+    labels = [addon.getLocalizedString(label_id) for _key, label_id, _speed in VOICE_PROFILES]
+    selected = xbmcgui.Dialog().select(addon.getLocalizedString(32027), labels)
+    if selected < 0:
+        return
+    profile, _label_id, speed = VOICE_PROFILES[selected]
+    settings.setString("voice_profile", profile)
+    settings.setInt("speech_speed_percent", speed)
+    notify("%s: %s (%s%%)" % (addon.getLocalizedString(32027), labels[selected], speed))
 
 
 def show_api_key_help(addon):
@@ -145,6 +172,7 @@ def main():
     choices = [
         "Test głosu",
         "Wybierz głos ElevenLabs",
+        addon.getLocalizedString(32027),
         addon.getLocalizedString(32210),
         addon.getLocalizedString(32200),
         "Ustawienia",
@@ -156,12 +184,14 @@ def main():
     elif selected == 1:
         choose_voice(addon)
     elif selected == 2:
-        configure_auto_subtitles(addon)
+        choose_voice_profile(addon)
     elif selected == 3:
-        show_api_key_help(addon)
+        configure_auto_subtitles(addon)
     elif selected == 4:
-        addon.openSettings()
+        show_api_key_help(addon)
     elif selected == 5:
+        addon.openSettings()
+    elif selected == 6:
         xbmcgui.Dialog().ok(
             "Kodi Lektor PL — dźwięk",
             "W Kodi otwórz Ustawienia → System → Dźwięk. Wyłącz przekazywanie dźwięku (passthrough) i ustaw „Odtwarzaj dźwięki GUI” na „Zawsze”. Lektor jest miksowany z filmem jako dźwięk WAV.",

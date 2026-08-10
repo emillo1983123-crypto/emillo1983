@@ -77,6 +77,22 @@ msgctxt "#32025"
 msgid "Save ElevenLabs credits"
 msgstr "Oszczędzaj kredyty ElevenLabs"
 
+msgctxt "#32026"
+msgid "Hide on-screen subtitles while the reader is active"
+msgstr "Ukrywaj napisy na ekranie, gdy działa lektor"
+
+msgctxt "#32027"
+msgid "Narrator profile"
+msgstr "Profil lektora"
+
+msgctxt "#32028"
+msgid "Classic — low and calm"
+msgstr "Klasyczny — niski i spokojny"
+
+msgctxt "#32029"
+msgid "Warm documentary"
+msgstr "Ciepły dokumentalny"
+
 msgctxt "#32030"
 msgid "Voice and API"
 msgstr "Głos i API"
@@ -84,6 +100,18 @@ msgstr "Głos i API"
 msgctxt "#32031"
 msgid "ElevenLabs"
 msgstr "ElevenLabs"
+
+msgctxt "#32032"
+msgid "Speech speed (%)"
+msgstr "Tempo lektora (%)"
+
+msgctxt "#32033"
+msgid "Natural"
+msgstr "Naturalny"
+
+msgctxt "#32034"
+msgid "Dynamic"
+msgstr "Dynamiczny"
 
 msgctxt "#32100"
 msgid "General reader and filtering settings"
@@ -133,9 +161,21 @@ msgctxt "#32125"
 msgid "Shortens only redundant speech, avoids repeated generations and omits request context; Flash uses fewer credits"
 msgstr "Skraca tylko zbędne powtórzenia, unika ponownej syntezy i pomija kontekst zapytania; Flash zużywa mniej kredytów"
 
+msgctxt "#32126"
+msgid "Keeps the subtitle file selected for narration, but hides its text over the movie"
+msgstr "Pozostawia plik napisów wybrany dla lektora, ale ukrywa jego tekst na obrazie filmu"
+
+msgctxt "#32127"
+msgid "Selects the narration style. A low tone depends on the legal ElevenLabs voice selected in your account; profiles do not imitate real people."
+msgstr "Wybiera styl narracji. Niski ton zależy od legalnego głosu ElevenLabs wybranego na Twoim koncie; profile nie imitują prawdziwych osób."
+
 msgctxt "#32130"
 msgid "Speech provider configuration"
 msgstr "Konfiguracja dostawcy głosu"
+
+msgctxt "#32132"
+msgid "Adjusts narration speed from 70 to 120 percent. The recommended calm setting is 95 percent."
+msgstr "Reguluje tempo lektora od 70 do 120 procent. Zalecane spokojne ustawienie to 95 procent."
 
 msgctxt "#32200"
 msgid "How to get an ElevenLabs API key"

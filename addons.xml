@@ -2,12 +2,12 @@
 <addons>
   <addon id="repository.subtitle.tts.pl"
          name="Lektor PL — repozytorium emillo1983"
-         version="1.0.7"
+         version="1.0.8"
          provider-name="emillo1983">
     <extension point="xbmc.addon.repository" name="Lektor PL">
       <dir>
-          <info compressed="false">https://emillo1983123-crypto.github.io/emillo1983/addons.xml?repo=1.0.7</info>
-          <checksum>https://emillo1983123-crypto.github.io/emillo1983/addons.xml.md5?repo=1.0.7</checksum>
+          <info compressed="false">https://emillo1983123-crypto.github.io/emillo1983/addons.xml?repo=1.0.8</info>
+          <checksum>https://emillo1983123-crypto.github.io/emillo1983/addons.xml.md5?repo=1.0.8</checksum>
         <datadir zip="true">https://emillo1983123-crypto.github.io/emillo1983/zips/</datadir>
         <hashes>false</hashes>
       </dir>
@@ -22,10 +22,10 @@
       </assets>
       <platform>all</platform>
       <license>MIT</license>
-      <news>1.0.7 — Kodi Lektor PL 0.8.0: naturalniejsze czytanie, oszczędzanie kredytów, automatyczne napisy i ikona KWPJ LABS.</news>
+      <news>1.0.8 — Kodi Lektor PL 0.8.1: ukrywanie napisów ekranowych, spokojniejsze tempo, profile narracji i pełne kwestie bez obcinania.</news>
     </extension>
   </addon>
-  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="0.8.0" provider-name="emillo1983">
+  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="0.8.1" provider-name="emillo1983">
     <requires>
       <import addon="xbmc.python" version="3.0.1"/>
     </requires>

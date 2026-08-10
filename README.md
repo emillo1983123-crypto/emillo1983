@@ -8,7 +8,7 @@ oznaczony jako **emillo1983**.
 
 ## Instalacja w Kodi 20 lub 21
 
-1. Pobierz [pakiet repozytorium Kodi](https://emillo1983123-crypto.github.io/emillo1983/repository.subtitle.tts.pl-1.0.7.zip).
+1. Pobierz [pakiet repozytorium Kodi](https://emillo1983123-crypto.github.io/emillo1983/repository.subtitle.tts.pl-1.0.8.zip).
 2. W Kodi włącz `Ustawienia → System → Dodatki → Nieznane źródła`.
 3. Wybierz `Dodatki → Zainstaluj z pliku ZIP` i wskaż pobrany plik.
 4. Wybierz `Zainstaluj z repozytorium → Lektor PL — repozytorium emillo1983`.
@@ -34,6 +34,21 @@ Każdy użytkownik dodatku powinien korzystać z własnego klucza:
 Nie udostępniaj klucza nikomu. API jest dostępne w planie darmowym, ale każde
 generowanie mowy zużywa kredyty. Repozytorium ani dodatek nie zawierają
 wspólnego klucza API.
+
+## Profile i tempo lektora
+
+W ustawieniach dodatku można jednym wyborem ustawić profil narracji:
+**Klasyczny — niski i spokojny**, **Ciepły dokumentalny**, **Naturalny** albo
+**Dynamiczny**. Są to autorskie archetypy sposobu czytania — nie imitują głosu
+ani wizerunku żadnej prawdziwej osoby. Domyślny profil klasyczny oraz tempo 95%
+dają spokojniejszy, tradycyjny charakter narracji. Suwak pozwala wybrać tempo
+od 70% do 120%.
+
+API ElevenLabs nie udostępnia dodatkom osobnej, technicznej regulacji wysokości
+głosu. Rzeczywiście niski ton zależy więc przede wszystkim od legalnego głosu
+wybranego na koncie ElevenLabs i wpisanego w dodatku jako `Voice ID`. Profile
+zmieniają sposób prowadzenia narracji, ale nie służą do kopiowania konkretnych
+lektorów.
 
 ## Oszczędzanie kredytów ElevenLabs
 
@@ -67,7 +82,7 @@ Kodi nie może mieszać głosu lektora z surowym strumieniem passthrough.
 
 ## Obsługiwane napisy
 
-Wersja 0.8.0 obsługuje tekstowe napisy SRT, VTT, ASS/SSA i MicroDVD.
+Wersja 0.8.1 obsługuje tekstowe napisy SRT, VTT, ASS/SSA i MicroDVD.
 Napisy obrazkowe PGS, VobSub i DVD nie zawierają tekstu i nie mogą zostać
 odczytane bez OCR.
 

@@ -8,6 +8,7 @@ import queue
 import re
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 import xbmc
@@ -18,7 +19,7 @@ import xbmcvfs
 from auto_subtitles import AutoSubtitleSearch, build_media_fingerprint
 from cue_tracker import ActiveCueTracker
 from family_filter import soften
-from speech import ElevenLabsClient, SpeechError
+from speech import ElevenLabsClient, SpeechCancelled, SpeechError
 from subtitle_source import SubtitleSource
 from text_normalizer import compress_for_economy, normalize_for_speech
 
@@ -26,6 +27,10 @@ from text_normalizer import compress_for_economy, normalize_for_speech
 ADDON_ID = "service.subtitle.tts.pl"
 TITLE = "Kodi Lektor PL"
 AUTO_SUBTITLE_DELAY_SECONDS = 7.0
+SUBTITLE_HIDE_CONFIRM_SECONDS = 0.75
+MAX_RESULT_AGE_SECONDS = 20.0
+MAX_JOB_QUEUE_SIZE = 3
+MAX_READY_AUDIO_SIZE = 3
 
 
 def log(message, level=xbmc.LOGINFO):
@@ -64,6 +69,8 @@ class Job:
     previous_text: str = ""
     next_text: str = ""
     economy_mode: bool = False
+    speech_speed_percent: int = 95
+    voice_profile: str = "classic"
 
 
 @dataclass(frozen=True)
@@ -76,24 +83,26 @@ class Result:
 class LatestWorker(threading.Thread):
     def __init__(self):
         super().__init__(name="KodiLektorTTS", daemon=True)
-        self.jobs = queue.Queue(maxsize=1)
+        self.jobs = queue.Queue(maxsize=MAX_JOB_QUEUE_SIZE)
         self.results = queue.Queue()
         self.stopping = threading.Event()
+        self.latest_generation = 0
 
     def submit(self, job):
+        self.latest_generation = job.generation
         try:
             self.jobs.put_nowait(job)
-            return
+            return True
         except queue.Full:
-            pass
-        try:
-            self.jobs.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            self.jobs.put_nowait(job)
-        except queue.Full:
-            pass
+            return False
+
+    def invalidate(self, generation):
+        self.latest_generation = generation
+        while True:
+            try:
+                self.jobs.get_nowait()
+            except queue.Empty:
+                break
 
     def stop(self):
         self.stopping.set()
@@ -110,15 +119,43 @@ class LatestWorker(threading.Thread):
                 continue
             if job is None:
                 continue
-            client = ElevenLabsClient(job.api_key, job.voice_id, job.model_id, job.cache_dir)
+            if job.generation != self.latest_generation:
+                continue
+            client = ElevenLabsClient(
+                job.api_key,
+                job.voice_id,
+                job.model_id,
+                job.cache_dir,
+                speech_speed_percent=job.speech_speed_percent,
+                voice_profile=job.voice_profile,
+            )
+            cancelled = lambda: (
+                self.stopping.is_set() or job.generation != self.latest_generation
+            )
             try:
-                audio = client.synthesize(job.text, job.previous_text, job.next_text, job.economy_mode)
+                audio = client.synthesize(
+                    job.text,
+                    job.previous_text,
+                    job.next_text,
+                    job.economy_mode,
+                    cancelled=cancelled,
+                )
                 self.results.put(Result(job, audio=audio))
+            except SpeechCancelled:
+                continue
             except SpeechError as exc:
                 if exc.retryable and time.monotonic() - job.created < 7.0 and not self.stopping.wait(0.8):
                     try:
-                        audio = client.synthesize(job.text, job.previous_text, job.next_text, job.economy_mode)
+                        audio = client.synthesize(
+                            job.text,
+                            job.previous_text,
+                            job.next_text,
+                            job.economy_mode,
+                            cancelled=cancelled,
+                        )
                         self.results.put(Result(job, audio=audio))
+                        continue
+                    except SpeechCancelled:
                         continue
                     except SpeechError as retry_error:
                         exc = retry_error
@@ -180,6 +217,7 @@ class ReaderService:
         self.last_visible_text = ""
         self.recent = {}
         self.pending_audio = None
+        self.pending_audio_queue = deque()
         self.next_audio_at = 0.0
         self.playback_started = 0.0
         self.no_source_notified = False
@@ -188,12 +226,20 @@ class ReaderService:
         self.last_errors = {}
         self.last_player_time = None
         self.last_player_clock = None
+        self.subtitles_hidden_by_us = False
+        self.subtitles_were_visible = False
+        self.subtitle_manual_override = False
+        self.subtitle_audio_source = None
+        self.hidden_subtitle_source = None
+        self.subtitle_hide_requested_at = None
 
     def reload_settings(self):
         old_signature = self._tts_config_signature(self.config)
+        old_config = dict(self.config)
         new_config = {
             "enabled": self.settings.getBool("tts_enabled"),
             "auto_subtitles": self.settings.getBool("auto_subtitles"),
+            "hide_visible_subtitles": self.settings.getBool("hide_visible_subtitles"),
             "family_mode": self.settings.getBool("family_mode"),
             "economy_mode": self.settings.getBool("economy_mode"),
             "filter_level": self.settings.getString("filter_level") or "family",
@@ -203,11 +249,19 @@ class ReaderService:
             "api_key": self.settings.getString("api_key").strip(),
             "voice_id": self.settings.getString("voice_id").strip(),
             "model_id": self.settings.getString("model_id").strip() or "eleven_flash_v2_5",
+            "speech_speed_percent": self.settings.getInt("speech_speed_percent") or 95,
+            "voice_profile": self.settings.getString("voice_profile").strip() or "classic",
         }
         self.config = new_config
         self.monitor.settings_changed = False
         if old_signature and old_signature != self._tts_config_signature(new_config):
             self.invalidate_audio(stop_sfx=True)
+        if old_config and (
+            not new_config["enabled"]
+            or not new_config["hide_visible_subtitles"]
+            or not new_config["api_key"]
+        ):
+            self._restore_visible_subtitles()
 
     @staticmethod
     def _tts_config_signature(config):
@@ -223,10 +277,12 @@ class ReaderService:
                 "api_key",
                 "voice_id",
                 "model_id",
+                "speech_speed_percent",
+                "voice_profile",
             )
         )
 
-    def _prepare_spoken(self, text, limit):
+    def _prepare_spoken(self, text, limit=None):
         value = text or ""
         if self.config["family_mode"]:
             value = soften(value, self.config["filter_level"])
@@ -234,13 +290,22 @@ class ReaderService:
             value = compress_for_economy(value)
         else:
             value = normalize_for_speech(value)
-        return value[:limit].strip()
+        value = value.strip()
+        return value[:limit].strip() if limit else value
 
     def invalidate_audio(self, stop_sfx=False, reset_cues=True):
         self.generation += 1
+        invalidate_worker = getattr(getattr(self, "worker", None), "invalidate", None)
+        if callable(invalidate_worker):
+            invalidate_worker(self.generation)
         self.last_visible_text = ""
         self.recent.clear()
         self.pending_audio = None
+        pending_queue = getattr(self, "pending_audio_queue", None)
+        if pending_queue is None:
+            self.pending_audio_queue = deque()
+        else:
+            pending_queue.clear()
         self.next_audio_at = 0.0
         if reset_cues:
             self.cue_tracker.reset()
@@ -251,6 +316,7 @@ class ReaderService:
                 pass
 
     def reset_playback(self, playing_file=""):
+        self._restore_visible_subtitles()
         self.invalidate_audio(stop_sfx=bool(self.playing_file))
         self.playing_file = playing_file
         self.source.reset(playing_file)
@@ -260,6 +326,90 @@ class ReaderService:
         self.audio_warning_shown = False
         self.last_player_time = None
         self.last_player_clock = None
+        self.subtitles_hidden_by_us = False
+        self.subtitles_were_visible = False
+        self.subtitle_manual_override = False
+        self.subtitle_audio_source = None
+        self.hidden_subtitle_source = None
+        self.subtitle_hide_requested_at = None
+
+    @staticmethod
+    def _subtitle_overlay_visible():
+        try:
+            return bool(xbmc.getCondVisibility("VideoPlayer.SubtitlesEnabled"))
+        except Exception:
+            return None
+
+    def _restore_visible_subtitles(self):
+        """Restore the overlay only when this service previously hid it."""
+
+        if not (
+            getattr(self, "subtitles_hidden_by_us", False)
+            and getattr(self, "subtitles_were_visible", False)
+        ):
+            return False
+        try:
+            self.player.showSubtitles(True)
+        except Exception as exc:
+            log("Nie mozna przywrocic napisow ekranowych: %s" % exc, xbmc.LOGERROR)
+            return False
+        self.subtitles_hidden_by_us = False
+        self.subtitles_were_visible = False
+        self.hidden_subtitle_source = None
+        self.subtitle_hide_requested_at = None
+        return True
+
+    def _observe_subtitle_manual_override(self, source_key):
+        """Remember a user's decision to show subtitles for this playback."""
+
+        if (
+            not source_key
+            or getattr(self, "subtitle_manual_override", False)
+            or not self.config.get("hide_visible_subtitles")
+            or source_key != getattr(self, "subtitle_audio_source", None)
+        ):
+            return False
+        requested_at = getattr(self, "subtitle_hide_requested_at", None)
+        if (
+            getattr(self, "subtitles_hidden_by_us", False)
+            and requested_at is not None
+            and time.monotonic() - requested_at < SUBTITLE_HIDE_CONFIRM_SECONDS
+        ):
+            # Kodi may need a few frames before its visibility condition
+            # reflects showSubtitles(False). Do not mistake that propagation
+            # delay for a user's manual override.
+            return False
+        if self._subtitle_overlay_visible() is not True:
+            return False
+        self.subtitle_manual_override = True
+        self.subtitles_hidden_by_us = False
+        self.subtitles_were_visible = False
+        self.hidden_subtitle_source = None
+        self.subtitle_hide_requested_at = None
+        return True
+
+    def _hide_visible_subtitles_for_audio(self, source_key):
+        """Hide the overlay immediately before starting synthesized audio."""
+
+        if (
+            not self.config.get("enabled")
+            or not self.config.get("hide_visible_subtitles")
+            or getattr(self, "subtitle_manual_override", False)
+            or not source_key
+            or not self.source.selected_path
+            or self._subtitle_overlay_visible() is not True
+        ):
+            return False
+        try:
+            self.player.showSubtitles(False)
+        except Exception as exc:
+            log("Nie mozna ukryc napisow ekranowych: %s" % exc, xbmc.LOGERROR)
+            return False
+        self.subtitles_hidden_by_us = True
+        self.subtitles_were_visible = True
+        self.hidden_subtitle_source = source_key
+        self.subtitle_hide_requested_at = time.monotonic()
+        return True
 
     def _auto_subtitle_notification(self, message):
         """Show only final auto-search outcomes; the helper suppresses repeats."""
@@ -379,7 +529,7 @@ class ReaderService:
             self.audio_warning_shown = True
 
     def submit_text(self, text, previous_text="", next_text="", cue_ids=()):
-        spoken = self._prepare_spoken(text, 500)
+        spoken = self._prepare_spoken(text)
         if not spoken:
             return False
         economy_mode = bool(self.config.get("economy_mode"))
@@ -395,8 +545,7 @@ class ReaderService:
             self.recent[spoken] = now
         profile = xbmcvfs.translatePath(self.addon.getAddonInfo("profile"))
         cache_dir = os.path.join(profile, "cache")
-        self.worker.submit(
-            Job(
+        job = Job(
                 spoken,
                 now,
                 self.config["api_key"],
@@ -408,12 +557,19 @@ class ReaderService:
                 previous_spoken,
                 next_spoken,
                 economy_mode,
+                self.config.get("speech_speed_percent", 95),
+                self.config.get("voice_profile", "classic"),
             )
-        )
+        if self.worker.submit(job) is False:
+            if cue_ids:
+                self.cue_tracker.seen.difference_update(cue_ids)
+            log("Kolejka lektora jest chwilowo pełna", xbmc.LOGDEBUG)
+            return False
         log("Przyjęto nową kwestię napisów")
         return True
 
     def report_error(self, error):
+        self._restore_visible_subtitles()
         message = getattr(error, "user_message", "Nie udało się przygotować głosu.")
         now = time.monotonic()
         if now - self.last_errors.get(message, -1000.0) >= 60:
@@ -422,6 +578,7 @@ class ReaderService:
         log(message, xbmc.LOGERROR)
 
     def process_results(self):
+        now = time.monotonic()
         while True:
             try:
                 result = self.worker.results.get_nowait()
@@ -432,17 +589,34 @@ class ReaderService:
             if result.error:
                 self.report_error(result.error)
                 continue
-            if time.monotonic() - result.job.created <= 12.0:
-                self.pending_audio = result
-        if self.pending_audio and self.pending_audio.job.generation != self.generation:
-            self.pending_audio = None
-        if self.pending_audio and time.monotonic() >= self.next_audio_at:
+            if now - result.job.created <= MAX_RESULT_AGE_SECONDS:
+                if self.pending_audio is None:
+                    self.pending_audio = result
+                elif len(self.pending_audio_queue) < MAX_READY_AUDIO_SIZE - 1:
+                    self.pending_audio_queue.append(result)
+                else:
+                    log("Bufor gotowego głosu jest pełny — pomijam spóźnioną kwestię", xbmc.LOGDEBUG)
+
+        while self.pending_audio and (
+            self.pending_audio.job.generation != self.generation
+            or now - self.pending_audio.job.created > MAX_RESULT_AGE_SECONDS
+        ):
+            self.pending_audio = self.pending_audio_queue.popleft() if self.pending_audio_queue else None
+
+        if self.pending_audio and now >= self.next_audio_at:
             result = self.pending_audio
-            self.pending_audio = None
+            self.pending_audio = self.pending_audio_queue.popleft() if self.pending_audio_queue else None
+            source_key = getattr(getattr(self, "cue_tracker", None), "source_key", None)
+            hidden_for_attempt = self._hide_visible_subtitles_for_audio(source_key)
             try:
                 xbmc.playSFX(result.audio.path, False)
+                self.subtitle_audio_source = source_key
+                if getattr(self, "subtitles_hidden_by_us", False):
+                    self.hidden_subtitle_source = source_key
                 self.next_audio_at = time.monotonic() + max(0.2, result.audio.duration) + self.config["min_gap"]
             except Exception as exc:
+                if hidden_for_attempt:
+                    self._restore_visible_subtitles()
                 log("Nie można odtworzyć WAV: %s" % exc, xbmc.LOGERROR)
                 notification("Kodi nie odtworzył próbki WAV. Sprawdź ustawienia dźwięku.", True)
 
@@ -470,9 +644,13 @@ class ReaderService:
             # A full reset here would restart the grace period and search loop.
             self.player.av_changed = False
             self._force_source_rescan()
+        if not self.config.get("hide_visible_subtitles"):
+            self._restore_visible_subtitles()
         if not self.config["enabled"]:
+            self._restore_visible_subtitles()
             return
         if not self.config["api_key"]:
+            self._restore_visible_subtitles()
             if not self.no_key_notified:
                 self.no_key_notified = True
                 notification("Wpisz klucz API ElevenLabs w ustawieniach Kodi Lektor PL.", True, 8000)
@@ -501,8 +679,10 @@ class ReaderService:
             delay = 0.0
         seconds = player_seconds - delay + self.config["offset"]
         source_key, contexts = self.source.cues_at(max(0.0, seconds))
-        if self.cue_tracker.use_source(source_key):
+        source_changed = self.cue_tracker.use_source(source_key)
+        if source_changed:
             self.invalidate_audio(stop_sfx=True, reset_cues=False)
+        self._observe_subtitle_manual_override(source_key)
         batch = self.cue_tracker.observe(contexts)
         if batch:
             self.last_visible_text = batch.text
@@ -536,6 +716,7 @@ class ReaderService:
                 if self.monitor.waitForAbort(0.15):
                     break
         finally:
+            self._restore_visible_subtitles()
             self.worker.stop()
             self.worker.join(timeout=2.0)
             log("Zatrzymano")

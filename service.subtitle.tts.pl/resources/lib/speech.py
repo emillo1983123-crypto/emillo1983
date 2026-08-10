@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 import hashlib
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -16,16 +17,74 @@ from text_normalizer import compress_for_economy, normalize_for_speech
 
 
 API_BASE = "https://api.elevenlabs.io/v1"
-MAX_AUDIO_BYTES = 8 * 1024 * 1024
+MAX_AUDIO_BYTES = 64 * 1024 * 1024
 SAMPLE_RATE = 24000
 CONTEXT_LIMIT = 250
-VOICE_SETTINGS = {
-    "stability": 0.55,
-    "similarity_boost": 0.75,
-    "style": 0.0,
-    "use_speaker_boost": False,
-    "speed": 1.05,
+MAX_REQUEST_TEXT_CHARS = 9000
+MAX_TOTAL_TEXT_CHARS = 18000
+SPEED_PERCENT_MIN = 70
+SPEED_PERCENT_MAX = 120
+SENTENCE_BREAK_RE = re.compile(r"[.!?\u2026](?=\s)", re.UNICODE)
+VOICE_PROFILES = {
+    "classic": {
+        "stability": 0.70,
+        "similarity_boost": 0.75,
+        "style": 0.0,
+        "use_speaker_boost": False,
+    },
+    "natural": {
+        "stability": 0.55,
+        "similarity_boost": 0.75,
+        "style": 0.05,
+        "use_speaker_boost": True,
+    },
+    "warm": {
+        "stability": 0.65,
+        "similarity_boost": 0.80,
+        "style": 0.10,
+        "use_speaker_boost": True,
+    },
+    "dynamic": {
+        "stability": 0.40,
+        "similarity_boost": 0.70,
+        "style": 0.25,
+        "use_speaker_boost": True,
+    },
 }
+
+
+def _clamped_speed_percent(value):
+    try:
+        value = int(round(float(value)))
+    except (TypeError, ValueError, OverflowError):
+        value = 95
+    return max(SPEED_PERCENT_MIN, min(SPEED_PERCENT_MAX, value))
+
+
+def _split_text_for_api(text):
+    """Split normalized text at a sentence or word boundary without dropping words."""
+    remaining = text.strip()
+    chunks = []
+    while len(remaining) > MAX_REQUEST_TEXT_CHARS:
+        sentence_cut = 0
+        for match in SENTENCE_BREAK_RE.finditer(remaining, 0, MAX_REQUEST_TEXT_CHARS):
+            sentence_cut = match.end()
+        word_cut = remaining.rfind(" ", 0, MAX_REQUEST_TEXT_CHARS + 1)
+        if sentence_cut >= MAX_REQUEST_TEXT_CHARS // 2:
+            cut = sentence_cut
+        elif word_cut > 0:
+            cut = word_cut
+        else:
+            cut = MAX_REQUEST_TEXT_CHARS
+        chunk = remaining[:cut].strip()
+        if not chunk:
+            chunk = remaining[:MAX_REQUEST_TEXT_CHARS]
+            cut = MAX_REQUEST_TEXT_CHARS
+        chunks.append(chunk)
+        remaining = remaining[cut:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 class SpeechError(Exception):
@@ -34,6 +93,10 @@ class SpeechError(Exception):
         self.user_message = user_message
         self.status = status
         self.retryable = retryable
+
+
+class SpeechCancelled(Exception):
+    """Internal cancellation that must not be shown as a playback error."""
 
 
 @dataclass(frozen=True)
@@ -71,12 +134,24 @@ def _error_message(status, body):
 
 
 class ElevenLabsClient:
-    def __init__(self, api_key, voice_id, model_id, cache_dir, timeout=15):
+    def __init__(
+        self,
+        api_key,
+        voice_id,
+        model_id,
+        cache_dir,
+        timeout=15,
+        speech_speed_percent=95,
+        voice_profile="classic",
+    ):
         self.api_key = (api_key or "").strip()
         self.voice_id = (voice_id or "").strip()
         self.model_id = (model_id or "eleven_flash_v2_5").strip()
         self.cache_dir = cache_dir
         self.timeout = timeout
+        self.speech_speed_percent = _clamped_speed_percent(speech_speed_percent)
+        profile = str(voice_profile or "classic").strip().casefold()
+        self.voice_profile = profile if profile in VOICE_PROFILES else "classic"
 
     def _request(self, url, data=None):
         if not self.api_key:
@@ -116,8 +191,10 @@ class ElevenLabsClient:
             raise SpeechError("ElevenLabs zwrócił nieprawidłową listę głosów.")
 
     def _speech_options(self):
+        voice_settings = dict(VOICE_PROFILES[self.voice_profile])
+        voice_settings["speed"] = self.speech_speed_percent / 100.0
         options = {
-            "voice_settings": dict(VOICE_SETTINGS),
+            "voice_settings": voice_settings,
             "apply_text_normalization": "auto",
         }
         if self.model_id in ("eleven_flash_v2_5", "eleven_turbo_v2_5"):
@@ -132,14 +209,23 @@ class ElevenLabsClient:
             "text": text,
             "previous_text": previous_text,
             "next_text": next_text,
+            "voice_profile": self.voice_profile,
+            "speech_speed_percent": self.speech_speed_percent,
             "options": self._speech_options(),
         }
         material = json.dumps(signature, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
         return os.path.join(self.cache_dir, digest + ".wav")
 
-    def synthesize(self, text, previous_text="", next_text="", economy_mode=False):
-        text = (compress_for_economy(text) if economy_mode else normalize_for_speech(text))[:500]
+    def synthesize(
+        self,
+        text,
+        previous_text="",
+        next_text="",
+        economy_mode=False,
+        cancelled=None,
+    ):
+        text = compress_for_economy(text) if economy_mode else normalize_for_speech(text)
         if economy_mode:
             previous_text = ""
             next_text = ""
@@ -148,6 +234,10 @@ class ElevenLabsClient:
             next_text = normalize_for_speech(next_text)[:CONTEXT_LIMIT]
         if not text:
             raise SpeechError("Brak tekstu do przeczytania.")
+        if len(text) > MAX_TOTAL_TEXT_CHARS:
+            raise SpeechError(
+                "Pojedyncza kwestia napisów jest nienaturalnie długa i została pominięta dla ochrony limitu API."
+            )
         if not self.voice_id:
             raise SpeechError("Brak identyfikatora głosu. Wybierz głos w menu dodatku.")
         if self.cache_dir:
@@ -167,27 +257,37 @@ class ElevenLabsClient:
             API_BASE,
             urllib.parse.quote(self.voice_id, safe=""),
         )
-        request_data = {"text": text, "model_id": self.model_id}
-        request_data.update(self._speech_options())
-        if previous_text:
-            request_data["previous_text"] = previous_text
-        if next_text:
-            request_data["next_text"] = next_text
-        payload = json.dumps(
-            request_data,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        pcm = self._request(url, payload)
-        if not pcm or len(pcm) % 2:
-            raise SpeechError("ElevenLabs zwrócił uszkodzony dźwięk.")
+        chunks = _split_text_for_api(text)
         temporary = path + ".part"
+        pcm_bytes = 0
         try:
             with wave.open(temporary, "wb") as output:
                 output.setnchannels(1)
                 output.setsampwidth(2)
                 output.setframerate(SAMPLE_RATE)
-                output.writeframes(pcm)
+                for index, chunk in enumerate(chunks):
+                    if callable(cancelled) and cancelled():
+                        raise SpeechCancelled()
+                    request_data = {"text": chunk, "model_id": self.model_id}
+                    request_data.update(self._speech_options())
+                    chunk_previous = previous_text if index == 0 else chunks[index - 1][-CONTEXT_LIMIT:]
+                    chunk_next = next_text if index == len(chunks) - 1 else chunks[index + 1][:CONTEXT_LIMIT]
+                    if chunk_previous:
+                        request_data["previous_text"] = chunk_previous
+                    if chunk_next:
+                        request_data["next_text"] = chunk_next
+                    payload = json.dumps(
+                        request_data,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    pcm = self._request(url, payload)
+                    if callable(cancelled) and cancelled():
+                        raise SpeechCancelled()
+                    if not pcm or len(pcm) % 2:
+                        raise SpeechError("ElevenLabs zwrócił uszkodzony dźwięk.")
+                    output.writeframesraw(pcm)
+                    pcm_bytes += len(pcm)
             os.replace(temporary, path)
         finally:
             if os.path.exists(temporary):
@@ -196,7 +296,7 @@ class ElevenLabsClient:
                 except OSError:
                     pass
         self.prune_cache(128)
-        return SpeechResult(path, (len(pcm) // 2) / float(SAMPLE_RATE), False)
+        return SpeechResult(path, (pcm_bytes // 2) / float(SAMPLE_RATE), False)
 
     def prune_cache(self, keep):
         try:

@@ -124,29 +124,24 @@ def _repeat_is_protected(value, matches):
 
 
 def _without_direct_repetitions(value):
-    """Remove adjacent duplicate words or phrases of at most four words."""
+    """Remove obvious adjacent duplicate words, but keep repeated phrases."""
     result = value
     while True:
         matches = list(WORD_RE.finditer(result))
         removed = False
-        for width in range(min(4, len(matches) // 2), 0, -1):
-            for index in range(0, len(matches) - (2 * width) + 1):
-                first = matches[index : index + width]
-                second = matches[index + width : index + (2 * width)]
-                if [item.group(0).casefold() for item in first] != [
-                    item.group(0).casefold() for item in second
-                ]:
-                    continue
-                separator = result[first[-1].end() : second[0].start()]
-                if not REPEAT_SEPARATOR_RE.fullmatch(separator):
-                    continue
-                if _repeat_is_protected(result, first + second):
-                    continue
-                result = result[: first[-1].end()] + result[second[-1].end() :]
-                removed = True
-                break
-            if removed:
-                break
+        for index in range(0, len(matches) - 1):
+            first = matches[index]
+            second = matches[index + 1]
+            if first.group(0).casefold() != second.group(0).casefold():
+                continue
+            separator = result[first.end() : second.start()]
+            if not REPEAT_SEPARATOR_RE.fullmatch(separator):
+                continue
+            if _repeat_is_protected(result, (first, second)):
+                continue
+            result = result[: first.end()] + result[second.end() :]
+            removed = True
+            break
         if not removed:
             return result
 
