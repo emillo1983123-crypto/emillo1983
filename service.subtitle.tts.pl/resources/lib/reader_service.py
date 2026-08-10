@@ -15,13 +15,17 @@ import xbmcaddon
 import xbmcgui
 import xbmcvfs
 
+from auto_subtitles import AutoSubtitleSearch, build_media_fingerprint
+from cue_tracker import ActiveCueTracker
 from family_filter import soften
 from speech import ElevenLabsClient, SpeechError
 from subtitle_source import SubtitleSource
+from text_normalizer import compress_for_economy, normalize_for_speech
 
 
 ADDON_ID = "service.subtitle.tts.pl"
 TITLE = "Kodi Lektor PL"
+AUTO_SUBTITLE_DELAY_SECONDS = 7.0
 
 
 def log(message, level=xbmc.LOGINFO):
@@ -55,6 +59,11 @@ class Job:
     voice_id: str
     model_id: str
     cache_dir: str
+    generation: int = 0
+    cue_ids: tuple = ()
+    previous_text: str = ""
+    next_text: str = ""
+    economy_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,12 +112,12 @@ class LatestWorker(threading.Thread):
                 continue
             client = ElevenLabsClient(job.api_key, job.voice_id, job.model_id, job.cache_dir)
             try:
-                audio = client.synthesize(job.text)
+                audio = client.synthesize(job.text, job.previous_text, job.next_text, job.economy_mode)
                 self.results.put(Result(job, audio=audio))
             except SpeechError as exc:
                 if exc.retryable and time.monotonic() - job.created < 7.0 and not self.stopping.wait(0.8):
                     try:
-                        audio = client.synthesize(job.text)
+                        audio = client.synthesize(job.text, job.previous_text, job.next_text, job.economy_mode)
                         self.results.put(Result(job, audio=audio))
                         continue
                     except SpeechError as retry_error:
@@ -132,18 +141,22 @@ class ServicePlayer(xbmc.Player):
     def __init__(self):
         super().__init__()
         self.changed = True
+        self.av_changed = False
 
     def onAVStarted(self):
         self.changed = True
+        self.av_changed = False
 
     def onAVChange(self):
-        self.changed = True
+        self.av_changed = True
 
     def onPlayBackStopped(self):
         self.changed = True
+        self.av_changed = False
 
     def onPlayBackEnded(self):
         self.changed = True
+        self.av_changed = False
 
 
 class ReaderService:
@@ -153,7 +166,15 @@ class ReaderService:
         self.monitor = ServiceMonitor()
         self.player = ServicePlayer()
         self.source = SubtitleSource(self.player, lambda value: log(value, xbmc.LOGDEBUG))
+        self.auto_subtitles = AutoSubtitleSearch(
+            xbmc.executeJSONRPC,
+            xbmc.executebuiltin,
+            notify=self._auto_subtitle_notification,
+            cooldown_seconds=30.0,
+        )
         self.worker = LatestWorker()
+        self.cue_tracker = ActiveCueTracker()
+        self.generation = 0
         self.config = {}
         self.playing_file = ""
         self.last_visible_text = ""
@@ -169,9 +190,12 @@ class ReaderService:
         self.last_player_clock = None
 
     def reload_settings(self):
-        self.config = {
+        old_signature = self._tts_config_signature(self.config)
+        new_config = {
             "enabled": self.settings.getBool("tts_enabled"),
+            "auto_subtitles": self.settings.getBool("auto_subtitles"),
             "family_mode": self.settings.getBool("family_mode"),
+            "economy_mode": self.settings.getBool("economy_mode"),
             "filter_level": self.settings.getString("filter_level") or "family",
             "offset": self.settings.getInt("subtitle_offset_ms") / 1000.0,
             "min_gap": self.settings.getInt("min_gap_ms") / 1000.0,
@@ -180,21 +204,167 @@ class ReaderService:
             "voice_id": self.settings.getString("voice_id").strip(),
             "model_id": self.settings.getString("model_id").strip() or "eleven_flash_v2_5",
         }
+        self.config = new_config
         self.monitor.settings_changed = False
+        if old_signature and old_signature != self._tts_config_signature(new_config):
+            self.invalidate_audio(stop_sfx=True)
 
-    def reset_playback(self, playing_file=""):
-        self.playing_file = playing_file
-        self.source.reset(playing_file)
+    @staticmethod
+    def _tts_config_signature(config):
+        if not config:
+            return ()
+        return tuple(
+            config.get(key)
+            for key in (
+                "enabled",
+                "family_mode",
+                "economy_mode",
+                "filter_level",
+                "api_key",
+                "voice_id",
+                "model_id",
+            )
+        )
+
+    def _prepare_spoken(self, text, limit):
+        value = text or ""
+        if self.config["family_mode"]:
+            value = soften(value, self.config["filter_level"])
+        if self.config.get("economy_mode"):
+            value = compress_for_economy(value)
+        else:
+            value = normalize_for_speech(value)
+        return value[:limit].strip()
+
+    def invalidate_audio(self, stop_sfx=False, reset_cues=True):
+        self.generation += 1
         self.last_visible_text = ""
         self.recent.clear()
         self.pending_audio = None
         self.next_audio_at = 0.0
+        if reset_cues:
+            self.cue_tracker.reset()
+        if stop_sfx:
+            try:
+                xbmc.stopSFX()
+            except Exception:
+                pass
+
+    def reset_playback(self, playing_file=""):
+        self.invalidate_audio(stop_sfx=bool(self.playing_file))
+        self.playing_file = playing_file
+        self.source.reset(playing_file)
         self.playback_started = time.monotonic()
         self.no_source_notified = False
         self.no_key_notified = False
         self.audio_warning_shown = False
         self.last_player_time = None
         self.last_player_clock = None
+
+    def _auto_subtitle_notification(self, message):
+        """Show only final auto-search outcomes; the helper suppresses repeats."""
+
+        notification(message, False, 6000)
+
+    @staticmethod
+    def _tag_value(tag, method_name, *args):
+        method = getattr(tag, method_name, None)
+        if not callable(method):
+            return None
+        try:
+            return method(*args)
+        except Exception:
+            return None
+
+    def _video_identity(self, current_file):
+        """Build a defensive movie/episode identity from Kodi's VideoInfoTag."""
+
+        try:
+            tag = self.player.getVideoInfoTag()
+        except Exception:
+            tag = None
+
+        media_type = ""
+        unique_ids = {}
+        season = None
+        episode = None
+        if tag is not None:
+            media_type = str(self._tag_value(tag, "getMediaType") or "").strip().casefold()
+            all_ids = self._tag_value(tag, "getUniqueIDs")
+            if isinstance(all_ids, dict):
+                for key, value in all_ids.items():
+                    if value not in (None, ""):
+                        unique_ids[str(key)] = str(value)
+            for key in ("imdb", "tmdb", "tvdb"):
+                if key not in unique_ids:
+                    value = self._tag_value(tag, "getUniqueID", key)
+                    if value not in (None, ""):
+                        unique_ids[key] = str(value)
+            season = self._tag_value(tag, "getSeason")
+            episode = self._tag_value(tag, "getEpisode")
+
+        if not isinstance(season, int) or season < 0:
+            season = None
+        if not isinstance(episode, int) or episode < 0:
+            episode = None
+        tv_types = {"episode", "tv", "tvshow", "series", "season"}
+        media_kind = "tv" if media_type in tv_types or season is not None or episode is not None else "movie"
+        fingerprint = build_media_fingerprint(
+            current_file,
+            media_kind,
+            unique_ids,
+            season,
+            episode,
+        )
+        return fingerprint, media_kind
+
+    def _is_live_playback(self, current_file):
+        value = str(current_file or "").strip().casefold()
+        if value.startswith("pvr://"):
+            return True
+        condition = getattr(xbmc, "getCondVisibility", None)
+        if callable(condition):
+            for name in ("Player.IsLive", "Pvr.IsPlayingTV", "Pvr.IsPlayingRadio"):
+                try:
+                    if condition(name):
+                        return True
+                except Exception:
+                    pass
+        try:
+            tag = self.player.getVideoInfoTag()
+        except Exception:
+            tag = None
+        media_type = str(self._tag_value(tag, "getMediaType") or "").strip().casefold() if tag else ""
+        return media_type in ("channel", "live", "livetv", "pvr")
+
+    def _maybe_open_subtitle_search(self, current_file, now=None):
+        """Open official search once after the text-source grace period."""
+
+        if not self.config.get("enabled") or not self.config.get("api_key"):
+            return None
+        if not self.config.get("auto_subtitles"):
+            return None
+        if self.source.selected_path:
+            return None
+        now = time.monotonic() if now is None else float(now)
+        if now - self.playback_started < AUTO_SUBTITLE_DELAY_SECONDS:
+            return None
+        if self._is_live_playback(current_file):
+            return None
+        fingerprint, media_kind = self._video_identity(current_file)
+        if not fingerprint:
+            return None
+        result = self.auto_subtitles.consider(fingerprint, media_kind, False)
+        if result.status == "opened":
+            log("Otwarto wyszukiwanie napisow dla %s" % media_kind)
+        elif result.status in ("configuration_error", "no_service", "builtin_error"):
+            log(result.message, xbmc.LOGERROR)
+        return result
+
+    def _force_source_rescan(self):
+        """Ask SubtitleSource to scan again without resetting playback state."""
+
+        self.source.last_scan = 0.0
 
     def warn_audio_settings(self):
         if self.audio_warning_shown:
@@ -204,28 +374,44 @@ class ReaderService:
         if passthrough is True:
             notification("Wyłącz passthrough w Ustawienia → System → Dźwięk, aby usłyszeć lektora.", True, 9000)
             self.audio_warning_shown = True
-        elif gui_sounds in (0, False):
+        elif gui_sounds is not None and gui_sounds != 2:
             notification("Ustaw „Odtwarzaj dźwięki GUI” na „Zawsze”, aby usłyszeć lektora.", True, 9000)
             self.audio_warning_shown = True
 
-    def submit_text(self, text):
-        spoken = soften(text, self.config["filter_level"]) if self.config["family_mode"] else " ".join(text.split())
-        spoken = spoken[:500].strip()
+    def submit_text(self, text, previous_text="", next_text="", cue_ids=()):
+        spoken = self._prepare_spoken(text, 500)
         if not spoken:
-            return
+            return False
+        economy_mode = bool(self.config.get("economy_mode"))
+        previous_spoken = "" if economy_mode else self._prepare_spoken(previous_text, 250)
+        next_spoken = "" if economy_mode else self._prepare_spoken(next_text, 250)
         now = time.monotonic()
-        for value, timestamp in list(self.recent.items()):
-            if now - timestamp > 20:
-                del self.recent[value]
-        if now - self.recent.get(spoken, -100.0) < 2.5:
-            return
-        self.recent[spoken] = now
+        if not cue_ids:
+            for value, timestamp in list(self.recent.items()):
+                if now - timestamp > 20:
+                    del self.recent[value]
+            if now - self.recent.get(spoken, -100.0) < 2.5:
+                return False
+            self.recent[spoken] = now
         profile = xbmcvfs.translatePath(self.addon.getAddonInfo("profile"))
         cache_dir = os.path.join(profile, "cache")
         self.worker.submit(
-            Job(spoken, now, self.config["api_key"], self.config["voice_id"], self.config["model_id"], cache_dir)
+            Job(
+                spoken,
+                now,
+                self.config["api_key"],
+                self.config["voice_id"],
+                self.config["model_id"],
+                cache_dir,
+                self.generation,
+                tuple(cue_ids),
+                previous_spoken,
+                next_spoken,
+                economy_mode,
+            )
         )
         log("Przyjęto nową kwestię napisów")
+        return True
 
     def report_error(self, error):
         message = getattr(error, "user_message", "Nie udało się przygotować głosu.")
@@ -241,11 +427,15 @@ class ReaderService:
                 result = self.worker.results.get_nowait()
             except queue.Empty:
                 break
+            if result.job.generation != self.generation:
+                continue
             if result.error:
                 self.report_error(result.error)
                 continue
             if time.monotonic() - result.job.created <= 12.0:
                 self.pending_audio = result
+        if self.pending_audio and self.pending_audio.job.generation != self.generation:
+            self.pending_audio = None
         if self.pending_audio and time.monotonic() >= self.next_audio_at:
             result = self.pending_audio
             self.pending_audio = None
@@ -271,9 +461,15 @@ class ReaderService:
             current_file = ""
         if self.player.changed or current_file != self.playing_file:
             self.player.changed = False
+            self.player.av_changed = False
             self.reset_playback(current_file)
             if self.config["show_status"]:
                 notification("Lektor aktywny — szukam napisów.", False, 3000)
+        elif getattr(self.player, "av_changed", False):
+            # A downloaded subtitle can emit AVChange for the same media file.
+            # A full reset here would restart the grace period and search loop.
+            self.player.av_changed = False
+            self._force_source_rescan()
         if not self.config["enabled"]:
             return
         if not self.config["api_key"]:
@@ -290,9 +486,7 @@ class ReaderService:
         if self.last_player_time is not None and self.last_player_clock is not None:
             expected = self.last_player_time + (clock - self.last_player_clock)
             if abs(player_seconds - expected) > 1.5:
-                self.last_visible_text = ""
-                self.recent.clear()
-                self.pending_audio = None
+                self.invalidate_audio(stop_sfx=True)
         self.last_player_time = player_seconds
         self.last_player_clock = clock
         # Kodi shifts display by Player.SubtitleDelay. To address the same cue,
@@ -306,11 +500,19 @@ class ReaderService:
         except (TypeError, ValueError):
             delay = 0.0
         seconds = player_seconds - delay + self.config["offset"]
-        text = self.source.text_at(max(0.0, seconds))
-        if text != self.last_visible_text:
-            self.last_visible_text = text
-            if text:
-                self.submit_text(text)
+        source_key, contexts = self.source.cues_at(max(0.0, seconds))
+        if self.cue_tracker.use_source(source_key):
+            self.invalidate_audio(stop_sfx=True, reset_cues=False)
+        batch = self.cue_tracker.observe(contexts)
+        if batch:
+            self.last_visible_text = batch.text
+            self.submit_text(
+                batch.text,
+                batch.previous_text,
+                batch.next_text,
+                batch.cue_ids,
+            )
+        self._maybe_open_subtitle_search(current_file, clock)
         if (
             not self.source.selected_path
             and not self.no_source_notified

@@ -1,3 +1,11 @@
+0.8.0 (2026-08-10)
+- Naturalizacja interpunkcji i pomijanie kwestii zawierających wyłącznie znaki.
+- Stabilne identyfikatory kwestii: brak powtórek przy nakładających się napisach.
+- Tryb oszczędny: mniej zbędnego tekstu, większe wykorzystanie cache i model Flash.
+- Automatyczne wyszukiwanie najlepiej ocenionych polskich napisów przez dostawcę Kodi.
+- Lepszy wybór pliku na podstawie nazwy, języka, długości filmu i typu napisów.
+- Instrukcja własnego klucza ElevenLabs oraz ikona KWPJ LABS.
+
 0.7.1
 - Uwzględnianie opóźnienia napisów ustawionego w odtwarzaczu Kodi.
 - Reset kolejki lektora po przewinięciu filmu.

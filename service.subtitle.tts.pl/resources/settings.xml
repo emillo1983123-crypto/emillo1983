@@ -45,6 +45,11 @@
           <default>true</default>
           <control type="toggle"/>
         </setting>
+        <setting id="auto_subtitles" type="boolean" label="32019" help="32119">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
       </group>
     </category>
     <category id="speech" label="32030" help="32130">
@@ -71,6 +76,11 @@
             </options>
           </constraints>
           <control type="list" format="string"><heading>32022</heading></control>
+        </setting>
+        <setting id="economy_mode" type="boolean" label="32025" help="32125">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
         </setting>
       </group>
     </category>

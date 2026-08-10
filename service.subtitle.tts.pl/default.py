@@ -14,6 +14,14 @@ LIB = xbmcvfs.translatePath("special://home/addons/%s/resources/lib" % ADDON_ID)
 if LIB not in sys.path:
     sys.path.insert(0, LIB)
 
+from auto_subtitles import (  # noqa: E402
+    JsonRpcError,
+    apply_setting_changes,
+    build_polish_auto_download_changes,
+    get_setting_value,
+    jsonrpc_call,
+    list_subtitle_modules,
+)
 from speech import ElevenLabsClient, SpeechError  # noqa: E402
 
 
@@ -81,17 +89,79 @@ def choose_voice(addon):
         notify("Nie udało się pobrać głosów. Sprawdź klucz API.", True)
 
 
+def show_api_key_help(addon):
+    xbmcgui.Dialog().textviewer(
+        addon.getLocalizedString(32201),
+        addon.getLocalizedString(32202),
+        usemono=False,
+    )
+
+
+def configure_auto_subtitles(addon):
+    """Configure Kodi's official subtitle search after explicit confirmation."""
+
+    try:
+        modules = list_subtitle_modules(xbmc.executeJSONRPC)
+    except (JsonRpcError, ValueError, TypeError):
+        notify(addon.getLocalizedString(32213), True)
+        return
+    if not modules:
+        xbmcgui.Dialog().ok(
+            addon.getLocalizedString(32210),
+            addon.getLocalizedString(32211),
+        )
+        return
+
+    labels = []
+    for module in modules:
+        suffix = "" if module["enabled"] else " — %s" % addon.getLocalizedString(32214)
+        version = " (%s)" % module["version"] if module["version"] else ""
+        labels.append("%s%s%s" % (module["name"], version, suffix))
+    selected = xbmcgui.Dialog().select(addon.getLocalizedString(32210), labels)
+    if selected < 0:
+        return
+
+    module = modules[selected]
+    try:
+        if not module["enabled"]:
+            jsonrpc_call(
+                xbmc.executeJSONRPC,
+                "Addons.SetAddonEnabled",
+                {"addonid": module["id"], "enabled": True},
+            )
+        languages = get_setting_value(xbmc.executeJSONRPC, "subtitles.languages", [])
+        changes = build_polish_auto_download_changes(languages)
+        changes["subtitles.movie"] = module["id"]
+        changes["subtitles.tv"] = module["id"]
+        apply_setting_changes(xbmc.executeJSONRPC, changes)
+        addon.getSettings().setBool("auto_subtitles", True)
+        notify(addon.getLocalizedString(32212) % module["name"])
+    except (JsonRpcError, ValueError, TypeError):
+        notify(addon.getLocalizedString(32213), True)
+
+
 def main():
     addon = xbmcaddon.Addon(ADDON_ID)
-    choices = ["Test głosu", "Wybierz głos ElevenLabs", "Ustawienia", "Pomoc z dźwiękiem"]
+    choices = [
+        "Test głosu",
+        "Wybierz głos ElevenLabs",
+        addon.getLocalizedString(32210),
+        addon.getLocalizedString(32200),
+        "Ustawienia",
+        "Pomoc z dźwiękiem",
+    ]
     selected = xbmcgui.Dialog().select("Kodi Lektor PL", choices)
     if selected == 0:
         test_voice(addon)
     elif selected == 1:
         choose_voice(addon)
     elif selected == 2:
-        addon.openSettings()
+        configure_auto_subtitles(addon)
     elif selected == 3:
+        show_api_key_help(addon)
+    elif selected == 4:
+        addon.openSettings()
+    elif selected == 5:
         xbmcgui.Dialog().ok(
             "Kodi Lektor PL — dźwięk",
             "W Kodi otwórz Ustawienia → System → Dźwięk. Wyłącz przekazywanie dźwięku (passthrough) i ustaw „Odtwarzaj dźwięki GUI” na „Zawsze”. Lektor jest miksowany z filmem jako dźwięk WAV.",

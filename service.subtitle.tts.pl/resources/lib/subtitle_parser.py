@@ -13,6 +13,7 @@ from typing import List
 TAG_RE = re.compile(r"<[^>]+>|\{\\[^}]*\}")
 SPACE_RE = re.compile(r"\s+")
 SOUND_ONLY_RE = re.compile(r"^\s*(?:\[[^]]+\]|\([^)]*\)|[♪♫\s]+)\s*$")
+DIALOGUE_PREFIX_RE = re.compile(r"^[-–—][ \t]+(?=[^\d\s])")
 
 
 @dataclass(frozen=True)
@@ -22,30 +23,55 @@ class Cue:
     text: str
 
 
+@dataclass(frozen=True)
+class CueContext:
+    index: int
+    cue: Cue
+    previous_text: str = ""
+    next_text: str = ""
+
+
 class SubtitleTrack:
     def __init__(self, cues, source=""):
         self.cues = sorted(cues, key=lambda cue: (cue.start, cue.end))
         self.starts = [cue.start for cue in self.cues]
         self.source = source
 
-    def at(self, seconds):
+    def active(self, seconds):
         if not self.cues:
-            return ""
+            return []
         index = bisect.bisect_right(self.starts, seconds) - 1
         if index < 0:
-            return ""
+            return []
+        active = []
+        first = max(0, index - 12)
+        for cue_index in range(first, index + 1):
+            cue = self.cues[cue_index]
+            if cue.start <= seconds <= cue.end:
+                active.append(
+                    CueContext(
+                        cue_index,
+                        cue,
+                        self.cues[cue_index - 1].text if cue_index else "",
+                        self.cues[cue_index + 1].text if cue_index + 1 < len(self.cues) else "",
+                    )
+                )
+        return active
+
+    def at(self, seconds):
         texts = []
-        for cue in self.cues[max(0, index - 12) : index + 1]:
-            if cue.start <= seconds <= cue.end and cue.text not in texts:
-                texts.append(cue.text)
+        for context in self.active(seconds):
+            if context.cue.text not in texts:
+                texts.append(context.cue.text)
         return " ".join(texts)
 
 
 def clean_text(value):
     value = value.replace("\\N", " ").replace("\\n", " ").replace("|", " ")
     value = html.unescape(TAG_RE.sub("", value))
-    value = SPACE_RE.sub(" ", value).strip(" \t\r\n-")
-    if not value or SOUND_ONLY_RE.match(value):
+    value = SPACE_RE.sub(" ", value).strip()
+    value = DIALOGUE_PREFIX_RE.sub("", value).strip()
+    if not value or SOUND_ONLY_RE.match(value) or not any(character.isalnum() for character in value):
         return ""
     return value
 
@@ -154,4 +180,3 @@ def parse_subtitle(data, filename=""):
     else:
         cues = parse_srt_or_vtt(text)
     return SubtitleTrack(cues, filename)
-

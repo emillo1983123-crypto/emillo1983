@@ -365,10 +365,6 @@ foreach ($AddonRoot in $AddonRoots) {
     }
     $SeenIds[$SourceManifest.Id] = $true
 
-    if ($SourceManifest.Id -eq $ServiceId -and $SourceManifest.Version -ne "0.7.1") {
-        Write-Warning "Budowana wersja $($SourceManifest.Version), a wersja poczatkowa miala byc 0.7.1. To jest poprawne po opublikowaniu aktualizacji."
-    }
-
     $PackageRoot = Join-Path $StagingRoot $SourceManifest.Id
     Copy-Item -LiteralPath $AddonRoot -Destination $PackageRoot -Recurse
 
@@ -460,16 +456,31 @@ $IndexHtml = @"
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Lektor PL &mdash; repozytorium Kodi</title>
+    <style>
+      body { max-width: 760px; margin: 40px auto; padding: 0 20px; font: 18px/1.55 system-ui, sans-serif; color: #eafcff; background: #051320; }
+      a { color: #19e2f2; }
+      .brand { display: flex; gap: 24px; align-items: center; margin-bottom: 28px; }
+      .brand img { width: 160px; height: 160px; border-radius: 22px; }
+      .card { padding: 22px 26px; border: 1px solid #177b88; border-radius: 18px; background: #092235; }
+      small { color: #f4cc67; }
+      @media (max-width: 560px) { .brand { display: block; } .brand img { width: 128px; height: 128px; } }
+    </style>
   </head>
   <body>
-    <h1>Lektor PL &mdash; repozytorium Kodi</h1>
-    <p>W Kodi zainstaluj najpierw pakiet repozytorium, a potem dodatek Lektor PL z tego repozytorium.</p>
-    <p><strong>Pakiet startowy:</strong>
-      <a href="$BootstrapName">$BootstrapName</a>
-    </p>
-    <ul>
+    <div class="brand">
+      <img src="zips/service.subtitle.tts.pl/resources/icon.png" alt="KWPJ LABS">
+      <div><h1>Lektor PL</h1><p>Naturalny polski lektor napis&oacute;w dla Kodi.</p></div>
+    </div>
+    <div class="card">
+      <p>W Kodi zainstaluj najpierw pakiet repozytorium, a potem dodatek Lektor PL z tego repozytorium.</p>
+      <p><strong>Pakiet startowy:</strong>
+        <a href="$BootstrapName">$BootstrapName</a>
+      </p>
+      <ul>
 $($Rows -join "`r`n")
-    </ul>
+      </ul>
+    </div>
+    <p><small>KWPJ LABS &middot; provider: emillo1983</small></p>
   </body>
 </html>
 "@

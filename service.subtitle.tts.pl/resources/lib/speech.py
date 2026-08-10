@@ -12,10 +12,20 @@ import urllib.request
 import wave
 from dataclasses import dataclass
 
+from text_normalizer import compress_for_economy, normalize_for_speech
+
 
 API_BASE = "https://api.elevenlabs.io/v1"
 MAX_AUDIO_BYTES = 8 * 1024 * 1024
 SAMPLE_RATE = 24000
+CONTEXT_LIMIT = 250
+VOICE_SETTINGS = {
+    "stability": 0.55,
+    "similarity_boost": 0.75,
+    "style": 0.0,
+    "use_speaker_boost": False,
+    "speed": 1.05,
+}
 
 
 class SpeechError(Exception):
@@ -105,21 +115,44 @@ class ElevenLabsClient:
         except (ValueError, TypeError, AttributeError):
             raise SpeechError("ElevenLabs zwrócił nieprawidłową listę głosów.")
 
-    def _cache_path(self, text):
-        digest = hashlib.sha256(
-            (self.voice_id + "\0" + self.model_id + "\0pcm_24000\0" + text).encode("utf-8")
-        ).hexdigest()
+    def _speech_options(self):
+        options = {
+            "voice_settings": dict(VOICE_SETTINGS),
+            "apply_text_normalization": "auto",
+        }
+        if self.model_id in ("eleven_flash_v2_5", "eleven_turbo_v2_5"):
+            options["language_code"] = "pl"
+        return options
+
+    def _cache_path(self, text, previous_text="", next_text=""):
+        signature = {
+            "voice_id": self.voice_id,
+            "model_id": self.model_id,
+            "output_format": "pcm_24000",
+            "text": text,
+            "previous_text": previous_text,
+            "next_text": next_text,
+            "options": self._speech_options(),
+        }
+        material = json.dumps(signature, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
         return os.path.join(self.cache_dir, digest + ".wav")
 
-    def synthesize(self, text):
-        text = " ".join((text or "").split())[:500]
+    def synthesize(self, text, previous_text="", next_text="", economy_mode=False):
+        text = (compress_for_economy(text) if economy_mode else normalize_for_speech(text))[:500]
+        if economy_mode:
+            previous_text = ""
+            next_text = ""
+        else:
+            previous_text = normalize_for_speech(previous_text)[-CONTEXT_LIMIT:]
+            next_text = normalize_for_speech(next_text)[:CONTEXT_LIMIT]
         if not text:
             raise SpeechError("Brak tekstu do przeczytania.")
         if not self.voice_id:
             raise SpeechError("Brak identyfikatora głosu. Wybierz głos w menu dodatku.")
         if self.cache_dir:
             os.makedirs(self.cache_dir, exist_ok=True)
-            path = self._cache_path(text)
+            path = self._cache_path(text, previous_text, next_text)
             if os.path.isfile(path) and os.path.getsize(path) > 44:
                 frames = max(0, os.path.getsize(path) - 44) // 2
                 try:
@@ -134,8 +167,14 @@ class ElevenLabsClient:
             API_BASE,
             urllib.parse.quote(self.voice_id, safe=""),
         )
+        request_data = {"text": text, "model_id": self.model_id}
+        request_data.update(self._speech_options())
+        if previous_text:
+            request_data["previous_text"] = previous_text
+        if next_text:
+            request_data["next_text"] = next_text
         payload = json.dumps(
-            {"text": text, "model_id": self.model_id},
+            request_data,
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -174,4 +213,3 @@ class ElevenLabsClient:
                     pass
         except OSError:
             pass
-

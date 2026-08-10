@@ -3,5 +3,6 @@ __pycache__/
 .pytest_cache/
 kodi_repository/.build/
 kodi_repository/public/
+.isolated-release-build-*/
 *.log
 *.pid

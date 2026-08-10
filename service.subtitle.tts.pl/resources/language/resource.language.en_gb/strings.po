@@ -48,6 +48,10 @@ msgctxt "#32018"
 msgid "Show status notifications"
 msgstr ""
 
+msgctxt "#32019"
+msgid "Automatically find Polish subtitles"
+msgstr ""
+
 msgctxt "#32020"
 msgid "API key"
 msgstr ""
@@ -66,6 +70,10 @@ msgstr ""
 
 msgctxt "#32024"
 msgid "Multilingual v2 — high quality"
+msgstr ""
+
+msgctxt "#32025"
+msgid "Save ElevenLabs credits"
 msgstr ""
 
 msgctxt "#32030"
@@ -104,6 +112,10 @@ msgctxt "#32118"
 msgid "Shows important reader status and error messages"
 msgstr ""
 
+msgctxt "#32119"
+msgid "Uses Kodi's configured subtitle provider and its highest-ranked Polish result"
+msgstr ""
+
 msgctxt "#32120"
 msgid "Masked on screen, but Kodi stores it locally without encryption"
 msgstr ""
@@ -116,6 +128,51 @@ msgctxt "#32122"
 msgid "Flash is faster; Multilingual usually sounds more natural"
 msgstr ""
 
+msgctxt "#32125"
+msgid "Shortens only redundant speech, avoids repeated generations and omits request context; Flash uses fewer credits"
+msgstr ""
+
 msgctxt "#32130"
 msgid "Speech provider configuration"
+msgstr ""
+
+msgctxt "#32200"
+msgid "How to get an ElevenLabs API key"
+msgstr ""
+
+msgctxt "#32201"
+msgid "How to get an ElevenLabs API key"
+msgstr ""
+
+msgctxt "#32202"
+msgid ""
+"1. Create a free account at https://elevenlabs.io.\n"
+"   Direct API-key page: https://elevenlabs.io/app/settings/api-keys\n"
+"2. Open Developers → API Keys.\n"
+"3. Select Create API Key and name it Kodi Lektor PL.\n"
+"4. Grant the Text to Speech permission.\n"
+"5. Optionally set a low credit limit.\n"
+"6. Copy the key immediately—it is displayed in full only once—and paste it into the add-on settings.\n"
+"\n"
+"Never share your key. The API is available on the free plan, but each speech generation uses credits. Every user should use their own key."
+msgstr ""
+
+msgctxt "#32210"
+msgid "Configure automatic Polish subtitles"
+msgstr ""
+
+msgctxt "#32211"
+msgid "Install and enable a subtitle provider first, for example OpenSubtitles.com, Napiprojekt.pl or Napisy24.pl from the official Kodi repository. Then return here."
+msgstr ""
+
+msgctxt "#32212"
+msgid "Automatic Polish subtitles configured: %s"
+msgstr ""
+
+msgctxt "#32213"
+msgid "Kodi could not configure automatic subtitles. Check the subtitle provider and try again."
+msgstr ""
+
+msgctxt "#32214"
+msgid "disabled — will be enabled"
 msgstr ""

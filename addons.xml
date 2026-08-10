@@ -2,26 +2,30 @@
 <addons>
   <addon id="repository.subtitle.tts.pl"
          name="Lektor PL — repozytorium emillo1983"
-         version="1.0.6"
+         version="1.0.7"
          provider-name="emillo1983">
     <extension point="xbmc.addon.repository" name="Lektor PL">
       <dir>
-          <info compressed="false">https://emillo1983123-crypto.github.io/emillo1983/addons.xml?repo=1.0.6</info>
-          <checksum>https://emillo1983123-crypto.github.io/emillo1983/addons.xml.md5?repo=1.0.6</checksum>
+          <info compressed="false">https://emillo1983123-crypto.github.io/emillo1983/addons.xml?repo=1.0.7</info>
+          <checksum>https://emillo1983123-crypto.github.io/emillo1983/addons.xml.md5?repo=1.0.7</checksum>
         <datadir zip="true">https://emillo1983123-crypto.github.io/emillo1983/zips/</datadir>
         <hashes>false</hashes>
       </dir>
     </extension>
     <extension point="xbmc.addon.metadata">
       <summary lang="pl_PL">Aktualizacje dodatku Lektor PL autorstwa emillo1983</summary>
-      <description lang="pl_PL">Publiczne repozytorium GitHub dodatku czytającego napisy w Kodi.</description>
+      <description lang="pl_PL">Publiczne repozytorium GitHub dodatku czytającego napisy w Kodi. Projekt KWPJ LABS rozwijany przez emillo1983.</description>
+      <description lang="en_GB">Public GitHub repository for a Kodi subtitle reader. A KWPJ LABS project maintained by emillo1983.</description>
       <disclaimer lang="pl_PL">Do syntezy mowy wymagany jest własny klucz API ElevenLabs.</disclaimer>
+      <assets>
+        <icon>resources/icon.png</icon>
+      </assets>
       <platform>all</platform>
       <license>MIT</license>
-      <news>1.0.6 — repozytorium przeniesione na GitHub Pages dla zgodności z Kodi.</news>
+      <news>1.0.7 — Kodi Lektor PL 0.8.0: naturalniejsze czytanie, oszczędzanie kredytów, automatyczne napisy i ikona KWPJ LABS.</news>
     </extension>
   </addon>
-  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="0.7.1" provider-name="emillo1983">
+  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="0.8.0" provider-name="emillo1983">
     <requires>
       <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -32,9 +36,12 @@
     <extension point="xbmc.addon.metadata">
       <summary lang="pl_PL">Czyta na głos napisy filmu</summary>
       <summary lang="en_GB">Reads movie subtitles aloud</summary>
-      <description lang="pl_PL">Lektor napisów z głosem ElevenLabs, bez Termuksa. Zawiera domyślnie włączony filtr rodzinny łagodzący wulgaryzmy.</description>
-      <description lang="en_GB">Subtitle narration using ElevenLabs without Termux. Includes a family-friendly profanity filter enabled by default.</description>
+      <description lang="pl_PL">Naturalny lektor napisów z głosem ElevenLabs, bez Termuksa. Automatycznie wyszukuje polskie napisy, oszczędza kredyty i łagodzi wulgaryzmy. Projekt KWPJ LABS rozwijany przez emillo1983.</description>
+      <description lang="en_GB">Natural subtitle narration using ElevenLabs without Termux. Automatically finds Polish subtitles, saves credits and softens profanity. A KWPJ LABS project maintained by emillo1983.</description>
       <disclaimer lang="pl_PL">Klucz API jest maskowany w interfejsie, ale Kodi zapisuje ustawienia lokalnie bez szyfrowania.</disclaimer>
+      <assets>
+        <icon>resources/icon.png</icon>
+      </assets>
       <platform>all</platform>
       <license>MIT</license>
     </extension>

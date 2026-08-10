@@ -1,4 +1,11 @@
 * text=auto
+*.html text eol=lf
+*.md text eol=lf
+*.po text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.txt text eol=lf
+*.xml text eol=lf
 *.zip binary
 addons.xml text eol=lf
 addons.xml.md5 text eol=lf
