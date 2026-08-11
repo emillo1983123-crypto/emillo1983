@@ -8,7 +8,7 @@ oznaczony jako **emillo1983**.
 
 ## Instalacja w Kodi 20 lub 21
 
-1. Pobierz [pakiet repozytorium Kodi](https://emillo1983123-crypto.github.io/emillo1983/repository.subtitle.tts.pl-1.0.9.zip).
+1. Pobierz [pakiet repozytorium Kodi](https://emillo1983123-crypto.github.io/emillo1983/repository.subtitle.tts.pl-1.0.10.zip).
 2. W Kodi włącz `Ustawienia → System → Dodatki → Nieznane źródła`.
 3. Wybierz `Dodatki → Zainstaluj z pliku ZIP` i wskaż pobrany plik.
 4. Wybierz `Zainstaluj z repozytorium → Lektor PL — repozytorium emillo1983`.
@@ -26,7 +26,7 @@ Każdy użytkownik dodatku powinien korzystać z własnego klucza:
 2. Otwórz `Developers → API Keys` albo przejdź bezpośrednio do
    [strony kluczy API](https://elevenlabs.io/app/settings/api-keys).
 3. Wybierz `Create API Key` i nazwij klucz `Kodi Lektor PL`.
-4. Nadaj kluczowi uprawnienie `Text to Speech`.
+4. Nadaj kluczowi uprawnienia `Text to Speech`, `Voices Read` i `User Read`.
 5. Opcjonalnie ustaw niski limit kredytów.
 6. Skopiuj klucz od razu — pełny klucz jest wyświetlany tylko raz — i wklej
    go w ustawieniach dodatku.
@@ -34,6 +34,13 @@ Każdy użytkownik dodatku powinien korzystać z własnego klucza:
 Nie udostępniaj klucza nikomu. API jest dostępne w planie darmowym, ale każde
 generowanie mowy zużywa kredyty. Repozytorium ani dodatek nie zawierają
 wspólnego klucza API.
+
+Uprawnienia są rozdzielone. `Text to Speech` wystarcza do samego czytania,
+`Voices Read` jest potrzebne do przycisku wyboru głosu, a `User Read` do
+licznika kredytów. Dlatego działający lektor i błąd po wejściu do listy głosów
+nie oznaczają sprzeczności ani złego klucza — zwykle trzeba włączyć brakujące
+uprawnienie w ustawieniach tego klucza. Warto również sprawdzić limit kredytów
+i listę dozwolonych adresów IP klucza.
 
 ## Profile i tempo lektora
 
@@ -59,17 +66,47 @@ nazw. Gotowa kwestia jest zapisywana w cache i przy powtórzeniu nie obciąża
 ponownie API. Tryb można wyłączyć, aby używać szerszego kontekstu sąsiednich
 kwestii kosztem mniejszej liczby trafień cache.
 
+## Licznik kredytów i koszt filmu
+
+Po znalezieniu tekstowych napisów dodatek w tle pobiera oficjalny stan konta
+ElevenLabs i jeden raz dla danego filmu pokazuje:
+
+- szacowaną liczbę kredytów potrzebnych na cały plik napisów,
+- stan bieżącego limitu zwrócony przez API ElevenLabs,
+- szacowany limit po obejrzeniu filmu.
+
+Ten sam raport można otworzyć ręcznie z menu dodatku. Wymaga on uprawnienia
+`User Read`; brak tego uprawnienia nie zatrzymuje lektora. W modelach Flash i
+Turbo planów samoobsługowych znak wysyłany przez API kosztuje bazowo około
+0,5 kredytu, a w Multilingual v2 około 1 kredytu. Wynik jest oznaczony jako
+szacunek: cache, pominięte kwestie, indywidualna stawka głosu i umowy
+Enterprise mogą zmienić rzeczywiste zużycie.
+
+Obecny endpoint konta ElevenLabs nadal opisuje podstawowy limit polami
+`character_count` i `character_limit`. Dlatego dodatek pokazuje te wartości
+jako znaki limitu, a szacowane kredyty filmu osobno. Nie miesza obu jednostek
+i nie przedstawia przybliżenia jako rachunku.
+
+Przycisk doładowania otwiera wyłącznie oficjalny panel ElevenLabs
+`Developers → Top Up`. Dodatek nie pobiera kodów BLIK, danych karty, loginu ani
+hasła i nie pośredniczy w płatności. Dostępne waluty, metody płatności i
+ostateczna cena są zawsze ustalane i wyświetlane przez ElevenLabs.
+
 ## Automatyczne polskie napisy
 
-1. Z oficjalnego repozytorium Kodi zainstaluj dostawcę napisów, np.
-   OpenSubtitles.com, Napiprojekt.pl albo Napisy24.pl.
+1. Z oficjalnego repozytorium Kodi zainstaluj **OpenSubtitles.com**
+   (`service.subtitles.opensubtitles-com`).
 2. Otwórz menu **Kodi Lektor PL** i wybierz
-   `Skonfiguruj automatyczne polskie napisy`.
-3. Wskaż dostawcę. Dodatek ustawi język polski oraz pobieranie jego najwyżej
-   ocenionego wyniku dla filmu lub odcinka.
+   `Ustaw OpenSubtitles.com dla polskich napisów`.
+3. Dodatek ustawi OpenSubtitles.com jako domyślne źródło dla filmów i seriali,
+   język polski oraz automatyczne pobieranie pierwszego wyniku.
+4. W ustawieniach OpenSubtitles.com zarejestruj albo zaimportuj własne konto,
+   jeśli dostawca tego wymaga.
 
-Dostawca może wymagać osobnego konta. Dodatek nie wyszukuje automatycznie
-napisów dla telewizji na żywo ani PVR.
+Jeżeli pierwsze wyszukiwanie nie przyniesie tekstowego pliku, dodatek wykona
+jedną ponowną próbę po 45 sekundach. Po dwóch próbach zatrzymuje się, aby nie
+tworzyć pętli okien. Dodatek nie odczytuje loginu ani hasła OpenSubtitles.com
+i nie wyszukuje automatycznie napisów dla telewizji na żywo ani PVR.
 
 ## Ustawienia dźwięku
 
@@ -82,7 +119,7 @@ Kodi nie może mieszać głosu lektora z surowym strumieniem passthrough.
 
 ## Obsługiwane napisy
 
-Wersja 0.8.2 obsługuje tekstowe napisy SRT, VTT, ASS/SSA i MicroDVD.
+Wersja 0.9.0 obsługuje tekstowe napisy SRT, VTT, ASS/SSA i MicroDVD.
 Napisy obrazkowe PGS, VobSub i DVD nie zawierają tekstu i nie mogą zostać
 odczytane bez OCR.
 

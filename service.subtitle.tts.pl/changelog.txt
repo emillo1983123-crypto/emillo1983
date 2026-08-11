@@ -1,3 +1,11 @@
+0.9.0 (2026-08-11)
+- Naprawiono fałszywy komunikat o błędnym kluczu: brak uprawnień, limit, głos i model mają osobne objaśnienia.
+- Lista głosów korzysta z aktualnego, stronicowanego API ElevenLabs.
+- Dodano licznik kredytów oraz przybliżony koszt całego filmu na podstawie wybranych napisów.
+- Dodano bezpieczny skrót do oficjalnego panelu ElevenLabs; dodatek nie pobiera danych płatniczych ani kodów BLIK.
+- Dodano jednoprzyciskową konfigurację OpenSubtitles.com jako domyślnego źródła polskich napisów.
+- Gdy pierwsze wyszukiwanie nie znajdzie tekstowych napisów, dodatek ponawia je raz po 45 sekundach.
+
 0.8.2 (2026-08-11)
 - Naprawiono błąd startu po aktualizacji, gdy Kodi pamiętało jeszcze starszy schemat ustawień.
 - Nowe ustawienia mają bezpieczne wartości domyślne podczas migracji bez utraty zapisanej konfiguracji.

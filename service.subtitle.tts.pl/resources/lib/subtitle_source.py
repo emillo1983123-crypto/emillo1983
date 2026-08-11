@@ -289,6 +289,29 @@ class SubtitleSource:
         source_key = (self.selected_path, modified, size)
         return source_key, track.active(seconds)
 
+    def selected_track(self, seconds=None, source_key=None):
+        """Return the complete currently selected text track.
+
+        ``seconds`` lets callers such as the executable add-on perform the
+        normal scan before asking for a track.  The optional ``source_key``
+        protects long-running background work from accidentally estimating a
+        subtitle file that Kodi replaced between two polling iterations.
+        """
+
+        if seconds is not None:
+            track = self._track_at(seconds)
+        elif self.selected_path:
+            track = self._load_track(self.selected_path)
+        else:
+            track = None
+        if not track or not self.selected_path:
+            return None
+        if source_key is not None:
+            modified, size = _local_stat(self.selected_path)
+            if source_key != (self.selected_path, modified, size):
+                return None
+        return track
+
     def text_at(self, seconds):
         track = self._track_at(seconds)
         return track.at(seconds) if track else ""

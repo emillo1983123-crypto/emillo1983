@@ -18,6 +18,7 @@ def _load_default_module():
     xbmc.playSFX = lambda *args, **kwargs: None
     xbmc.executeJSONRPC = lambda value: "{}"
     xbmc.executebuiltin = lambda value: None
+    xbmc.getCondVisibility = lambda value: False
 
     xbmcaddon = types.ModuleType("xbmcaddon")
     xbmcaddon.Addon = object
@@ -63,11 +64,17 @@ class _Settings:
     def setInt(self, key, value):
         self.values[key] = value
 
+    def setBool(self, key, value):
+        self.values[key] = bool(value)
+
     def getString(self, key):
         return str(self.values.get(key, "classic"))
 
     def getInt(self, key):
         return int(self.values.get(key, 95))
+
+    def getBool(self, key):
+        return bool(self.values.get(key, False))
 
 
 class _Addon:
@@ -79,6 +86,8 @@ class _Addon:
 
     @staticmethod
     def getLocalizedString(label_id):
+        if label_id == 32212:
+            return "configured: %s"
         return "label-%s" % label_id
 
 
@@ -178,6 +187,218 @@ class VoiceProfileMenuTests(unittest.TestCase):
         self.assertEqual(len(notifications), 1)
         self.assertTrue(notifications[0][-1])
         self.assertIn("uruchom", notifications[0][0].casefold())
+
+
+class OpenSubtitlesMenuTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = _load_default_module()
+
+    def test_missing_official_provider_opens_addon_browser_without_installing(self):
+        module = self.module
+        opened = []
+        dialogs = []
+        originals = (
+            module.list_subtitle_modules,
+            module.xbmc.executebuiltin,
+            module.xbmcgui.Dialog,
+        )
+        try:
+            module.list_subtitle_modules = lambda _jsonrpc: []
+            module.xbmc.executebuiltin = opened.append
+            module.xbmcgui.Dialog = lambda: types.SimpleNamespace(
+                ok=lambda heading, message: dialogs.append((heading, message))
+            )
+            self.assertFalse(module.configure_auto_subtitles(_Addon()))
+        finally:
+            (
+                module.list_subtitle_modules,
+                module.xbmc.executebuiltin,
+                module.xbmcgui.Dialog,
+            ) = originals
+
+        self.assertEqual(opened, ["ActivateWindow(addonbrowser)"])
+        self.assertEqual(len(dialogs), 1)
+
+    def test_installed_provider_is_enabled_and_set_for_movies_and_tv(self):
+        module = self.module
+        rpc_calls = []
+        applied = []
+        notices = []
+        originals = (
+            module.list_subtitle_modules,
+            module.jsonrpc_call,
+            module.get_setting_value,
+            module.apply_setting_changes,
+            module.notify,
+        )
+        try:
+            module.list_subtitle_modules = lambda _jsonrpc: [
+                {
+                    "id": "service.subtitles.opensubtitles-com",
+                    "name": "OpenSubtitles.com",
+                    "version": "1.0.9",
+                    "enabled": False,
+                }
+            ]
+            module.jsonrpc_call = lambda jsonrpc, method, params: rpc_calls.append(
+                (method, params)
+            )
+            module.get_setting_value = lambda jsonrpc, setting, default: ["English"]
+            module.apply_setting_changes = lambda jsonrpc, changes: applied.append(changes)
+            module.notify = lambda *args: notices.append(args)
+            addon = _Addon()
+            self.assertTrue(module.configure_auto_subtitles(addon))
+        finally:
+            (
+                module.list_subtitle_modules,
+                module.jsonrpc_call,
+                module.get_setting_value,
+                module.apply_setting_changes,
+                module.notify,
+            ) = originals
+
+        self.assertEqual(rpc_calls[0][0], "Addons.SetAddonEnabled")
+        self.assertEqual(
+            rpc_calls[0][1]["addonid"],
+            "service.subtitles.opensubtitles-com",
+        )
+        self.assertEqual(
+            applied[0]["subtitles.movie"],
+            "service.subtitles.opensubtitles-com",
+        )
+        self.assertEqual(
+            applied[0]["subtitles.tv"],
+            "service.subtitles.opensubtitles-com",
+        )
+        self.assertEqual(applied[0]["subtitles.languages"], ["Polish", "English"])
+        self.assertTrue(applied[0]["subtitles.downloadfirst"])
+        self.assertTrue(addon.settings.values["auto_subtitles"])
+        self.assertEqual(len(notices), 1)
+
+
+class AccountUsageMenuTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = _load_default_module()
+
+    @staticmethod
+    def _subscription():
+        from usage import parse_subscription_usage
+
+        return parse_subscription_usage(
+            {
+                "tier": "starter",
+                "status": "active",
+                "character_count": 2_000,
+                "character_limit": 10_000,
+            }
+        )
+
+    @staticmethod
+    def _estimate():
+        from usage import estimate_film_usage
+
+        return estimate_film_usage(
+            ["x" * 2_000],
+            lambda value: value,
+            "eleven_flash_v2_5",
+        )
+
+    def test_report_is_transparent_about_credits_and_approximation(self):
+        report = self.module.format_usage_report(
+            self._subscription(),
+            self._estimate(),
+        )
+        self.assertIn("Wykorzystano: 2 000 / 10 000 znaków limitu", report)
+        self.assertIn("API ElevenLabs raportuje ten limit w znakach", report)
+        self.assertIn("około 1 000 kredytów", report)
+        self.assertIn("po filmie pozostanie około 6 000 znaków limitu", report)
+        self.assertIn("przybliżenie, nie rachunek", report)
+
+    def test_report_distinguishes_included_limit_from_payg_extension(self):
+        from usage import parse_subscription_usage
+
+        usage = parse_subscription_usage(
+            {
+                "character_count": 9_500,
+                "character_limit": 10_000,
+                "max_character_limit_extension": 5_000,
+            }
+        )
+        report = self.module.format_usage_report(usage, self._estimate())
+        self.assertIn("przekroczy wliczony limit", report)
+        self.assertIn("PAYG albo rozliczenie dodatkowe", report)
+        self.assertNotIn("może zabraknąć", report)
+
+    def test_manual_usage_button_uses_account_endpoint_and_opens_report(self):
+        module = self.module
+        addon = _Addon()
+        addon.settings.values["api_key"] = "secret-value"
+        viewed = []
+        closed = []
+        originals = (
+            module.fetch_subscription,
+            module.estimate_current_film,
+            module.xbmcgui.DialogProgress,
+            module.xbmcgui.Dialog,
+        )
+        try:
+            module.fetch_subscription = lambda key: self._subscription()
+            module.estimate_current_film = lambda _addon: self._estimate()
+            module.xbmcgui.DialogProgress = lambda: types.SimpleNamespace(
+                create=lambda *args: None,
+                close=lambda: closed.append(True),
+            )
+            module.xbmcgui.Dialog = lambda: types.SimpleNamespace(
+                textviewer=lambda heading, body, usemono=False: viewed.append(
+                    (heading, body, usemono)
+                )
+            )
+            self.assertTrue(module.show_account_usage(addon))
+        finally:
+            (
+                module.fetch_subscription,
+                module.estimate_current_film,
+                module.xbmcgui.DialogProgress,
+                module.xbmcgui.Dialog,
+            ) = originals
+
+        self.assertEqual(closed, [True])
+        self.assertEqual(len(viewed), 1)
+        self.assertNotIn("secret-value", viewed[0][1])
+        self.assertIn("6 000", viewed[0][1])
+
+    def test_top_up_never_collects_payment_data_and_opens_only_official_url(self):
+        module = self.module
+        opened = []
+        prompts = []
+        originals = (
+            module.xbmc.getCondVisibility,
+            module.xbmc.executebuiltin,
+            module.xbmcgui.Dialog,
+            module.notify,
+        )
+        try:
+            module.xbmc.getCondVisibility = lambda condition: condition == "System.Platform.Android"
+            module.xbmc.executebuiltin = opened.append
+            module.xbmcgui.Dialog = lambda: types.SimpleNamespace(
+                yesno=lambda heading, message: prompts.append((heading, message)) or True
+            )
+            module.notify = lambda *args, **kwargs: None
+            self.assertTrue(module.open_elevenlabs_billing(_Addon()))
+        finally:
+            (
+                module.xbmc.getCondVisibility,
+                module.xbmc.executebuiltin,
+                module.xbmcgui.Dialog,
+                module.notify,
+            ) = originals
+
+        self.assertEqual(len(opened), 1)
+        self.assertIn("https://elevenlabs.io/app/developers", opened[0])
+        self.assertIn("nie przyjmuje kodów BLIK", prompts[0][1])
+        self.assertNotIn("api_key", opened[0].casefold())
 
 
 if __name__ == "__main__":
