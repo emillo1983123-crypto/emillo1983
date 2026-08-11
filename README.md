@@ -8,7 +8,7 @@ oznaczony jako **emillo1983**.
 
 ## Instalacja w Kodi 20 lub 21
 
-1. Pobierz [pakiet repozytorium Kodi](https://emillo1983123-crypto.github.io/emillo1983/repository.subtitle.tts.pl-1.0.8.zip).
+1. Pobierz [pakiet repozytorium Kodi](https://emillo1983123-crypto.github.io/emillo1983/repository.subtitle.tts.pl-1.0.9.zip).
 2. W Kodi włącz `Ustawienia → System → Dodatki → Nieznane źródła`.
 3. Wybierz `Dodatki → Zainstaluj z pliku ZIP` i wskaż pobrany plik.
 4. Wybierz `Zainstaluj z repozytorium → Lektor PL — repozytorium emillo1983`.
@@ -82,7 +82,7 @@ Kodi nie może mieszać głosu lektora z surowym strumieniem passthrough.
 
 ## Obsługiwane napisy
 
-Wersja 0.8.1 obsługuje tekstowe napisy SRT, VTT, ASS/SSA i MicroDVD.
+Wersja 0.8.2 obsługuje tekstowe napisy SRT, VTT, ASS/SSA i MicroDVD.
 Napisy obrazkowe PGS, VobSub i DVD nie zawierają tekstu i nie mogą zostać
 odczytane bez OCR.
 

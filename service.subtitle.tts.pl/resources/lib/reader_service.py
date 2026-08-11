@@ -31,6 +31,7 @@ SUBTITLE_HIDE_CONFIRM_SECONDS = 0.75
 MAX_RESULT_AGE_SECONDS = 20.0
 MAX_JOB_QUEUE_SIZE = 3
 MAX_READY_AUDIO_SIZE = 3
+VOICE_PROFILE_KEYS = ("classic", "warm", "natural", "dynamic")
 
 
 def log(message, level=xbmc.LOGINFO):
@@ -54,6 +55,45 @@ def setting_value(setting_id):
         return response.get("result", {}).get("value")
     except Exception:
         return None
+
+
+def _safe_new_bool(settings, setting_id, default):
+    """Read a newly introduced boolean without breaking a hot add-on update."""
+
+    try:
+        value = settings.getBool(setting_id)
+    except Exception:
+        return bool(default)
+    return value if isinstance(value, bool) else bool(default)
+
+
+def _safe_new_int(settings, setting_id, default, minimum=None, maximum=None):
+    """Read a newly introduced integer and reject missing or malformed values."""
+
+    try:
+        value = settings.getInt(setting_id)
+    except Exception:
+        return int(default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return int(default)
+    if minimum is not None and value < minimum:
+        return int(default)
+    if maximum is not None and value > maximum:
+        return int(default)
+    return value
+
+
+def _safe_new_profile(settings, setting_id, default="classic"):
+    """Read a known profile key while tolerating stale Kodi setting definitions."""
+
+    try:
+        value = settings.getString(setting_id)
+    except Exception:
+        return default
+    if not isinstance(value, str):
+        return default
+    value = value.strip().casefold()
+    return value if value in VOICE_PROFILE_KEYS else default
 
 
 @dataclass(frozen=True)
@@ -239,7 +279,9 @@ class ReaderService:
         new_config = {
             "enabled": self.settings.getBool("tts_enabled"),
             "auto_subtitles": self.settings.getBool("auto_subtitles"),
-            "hide_visible_subtitles": self.settings.getBool("hide_visible_subtitles"),
+            "hide_visible_subtitles": _safe_new_bool(
+                self.settings, "hide_visible_subtitles", True
+            ),
             "family_mode": self.settings.getBool("family_mode"),
             "economy_mode": self.settings.getBool("economy_mode"),
             "filter_level": self.settings.getString("filter_level") or "family",
@@ -249,8 +291,16 @@ class ReaderService:
             "api_key": self.settings.getString("api_key").strip(),
             "voice_id": self.settings.getString("voice_id").strip(),
             "model_id": self.settings.getString("model_id").strip() or "eleven_flash_v2_5",
-            "speech_speed_percent": self.settings.getInt("speech_speed_percent") or 95,
-            "voice_profile": self.settings.getString("voice_profile").strip() or "classic",
+            "speech_speed_percent": _safe_new_int(
+                self.settings,
+                "speech_speed_percent",
+                95,
+                minimum=70,
+                maximum=120,
+            ),
+            "voice_profile": _safe_new_profile(
+                self.settings, "voice_profile", "classic"
+            ),
         }
         self.config = new_config
         self.monitor.settings_changed = False

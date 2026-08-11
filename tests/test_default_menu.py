@@ -63,6 +63,12 @@ class _Settings:
     def setInt(self, key, value):
         self.values[key] = value
 
+    def getString(self, key):
+        return str(self.values.get(key, "classic"))
+
+    def getInt(self, key):
+        return int(self.values.get(key, 95))
+
 
 class _Addon:
     def __init__(self):
@@ -90,6 +96,30 @@ class VoiceProfileMenuTests(unittest.TestCase):
         menu_keys = {profile for profile, _label, _speed in self.module.VOICE_PROFILES}
         self.assertEqual(menu_keys, option_keys)
         self.assertEqual(menu_keys, set(VOICE_PROFILES))
+
+    def test_new_setting_readers_preserve_valid_values_and_fall_back_safely(self):
+        settings = _Settings()
+        settings.values.update(
+            {"voice_profile": "dynamic", "speech_speed_percent": 70}
+        )
+        self.assertEqual(self.module._safe_voice_profile(settings), "dynamic")
+        self.assertEqual(self.module._safe_speech_speed(settings), 70)
+
+        settings.values.update(
+            {"voice_profile": "unknown", "speech_speed_percent": 999}
+        )
+        self.assertEqual(self.module._safe_voice_profile(settings), "classic")
+        self.assertEqual(self.module._safe_speech_speed(settings), 95)
+
+        class LegacySettings:
+            def getString(self, key):
+                raise TypeError(key)
+
+            def getInt(self, key):
+                raise TypeError(key)
+
+        self.assertEqual(self.module._safe_voice_profile(LegacySettings()), "classic")
+        self.assertEqual(self.module._safe_speech_speed(LegacySettings()), 95)
 
     def test_each_one_click_profile_saves_profile_and_recommended_speed(self):
         original_dialog = self.module.xbmcgui.Dialog
@@ -120,6 +150,34 @@ class VoiceProfileMenuTests(unittest.TestCase):
             self.assertEqual(addon.settings.values, {})
         finally:
             self.module.xbmcgui.Dialog = original_dialog
+
+    def test_stale_settings_schema_reports_restart_instead_of_crashing(self):
+        class LegacySettings(_Settings):
+            def getString(self, key):
+                raise TypeError('Invalid setting type "string" for "%s"' % key)
+
+            def getInt(self, key):
+                raise TypeError('Invalid setting type "integer" for "%s"' % key)
+
+        addon = _Addon()
+        addon.settings = LegacySettings()
+        notifications = []
+        original_dialog = self.module.xbmcgui.Dialog
+        original_notify = self.module.notify
+        try:
+            self.module.xbmcgui.Dialog = lambda: types.SimpleNamespace(
+                select=lambda _heading, _labels: 0
+            )
+            self.module.notify = lambda *args: notifications.append(args)
+            self.assertFalse(self.module.choose_voice_profile(addon))
+        finally:
+            self.module.xbmcgui.Dialog = original_dialog
+            self.module.notify = original_notify
+
+        self.assertEqual(addon.settings.values, {})
+        self.assertEqual(len(notifications), 1)
+        self.assertTrue(notifications[0][-1])
+        self.assertIn("uruchom", notifications[0][0].casefold())
 
 
 if __name__ == "__main__":

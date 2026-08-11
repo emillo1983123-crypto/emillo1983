@@ -31,6 +31,28 @@ VOICE_PROFILES = (
     ("natural", 32033, 100),
     ("dynamic", 32034, 105),
 )
+VOICE_PROFILE_KEYS = {profile for profile, _label, _speed in VOICE_PROFILES}
+
+
+def _safe_speech_speed(settings):
+    try:
+        value = settings.getInt("speech_speed_percent")
+    except Exception:
+        return 95
+    if isinstance(value, bool) or not isinstance(value, int) or not 70 <= value <= 120:
+        return 95
+    return value
+
+
+def _safe_voice_profile(settings):
+    try:
+        value = settings.getString("voice_profile")
+    except Exception:
+        return "classic"
+    if not isinstance(value, str):
+        return "classic"
+    value = value.strip().casefold()
+    return value if value in VOICE_PROFILE_KEYS else "classic"
 
 
 def notify(message, error=False):
@@ -52,8 +74,8 @@ def test_voice(addon):
         voice_id=settings.getString("voice_id").strip(),
         model_id=settings.getString("model_id").strip(),
         cache_dir=cache_dir,
-        speech_speed_percent=settings.getInt("speech_speed_percent") or 95,
-        voice_profile=settings.getString("voice_profile").strip() or "classic",
+        speech_speed_percent=_safe_speech_speed(settings),
+        voice_profile=_safe_voice_profile(settings),
     )
     dialog = xbmcgui.DialogProgress()
     dialog.create("Kodi Lektor PL", "Tworzę próbkę głosu…")
@@ -111,9 +133,22 @@ def choose_voice_profile(addon):
     if selected < 0:
         return
     profile, _label_id, speed = VOICE_PROFILES[selected]
-    settings.setString("voice_profile", profile)
-    settings.setInt("speech_speed_percent", speed)
+    try:
+        # Probe both typed settings first. During a hot update Kodi can briefly
+        # retain the previous version's setting definitions in memory.
+        settings.getString("voice_profile")
+        settings.getInt("speech_speed_percent")
+        settings.setInt("speech_speed_percent", speed)
+        settings.setString("voice_profile", profile)
+    except Exception:
+        notify(
+            "Kodi nie odświeżył jeszcze ustawień dodatku. Zamknij całkowicie Kodi, "
+            "uruchom je ponownie i wybierz profil jeszcze raz.",
+            True,
+        )
+        return False
     notify("%s: %s (%s%%)" % (addon.getLocalizedString(32027), labels[selected], speed))
+    return True
 
 
 def show_api_key_help(addon):

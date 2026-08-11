@@ -1,3 +1,8 @@
+0.8.2 (2026-08-11)
+- Naprawiono błąd startu po aktualizacji, gdy Kodi pamiętało jeszcze starszy schemat ustawień.
+- Nowe ustawienia mają bezpieczne wartości domyślne podczas migracji bez utraty zapisanej konfiguracji.
+- Błąd uruchomienia zapisuje teraz oczyszczony traceback i pokazuje czytelny typ problemu.
+
 0.8.1 (2026-08-10)
 - Napisy ekranowe są domyślnie ukrywane dopiero przy poprawnym odtwarzaniu lektora.
 - Profile narracji: klasyczny, ciepły dokumentalny, naturalny i dynamiczny.

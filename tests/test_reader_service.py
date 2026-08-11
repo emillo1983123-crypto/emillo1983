@@ -135,6 +135,101 @@ class ReaderGenerationTests(unittest.TestCase):
         self.assertEqual(stopped, [True])
 
 
+class ReaderHotUpdateSettingsTests(unittest.TestCase):
+    class _LegacySettings:
+        old_values = {
+            "tts_enabled": True,
+            "auto_subtitles": True,
+            "family_mode": True,
+            "economy_mode": False,
+            "filter_level": "strict",
+            "subtitle_offset_ms": 300,
+            "min_gap_ms": 250,
+            "show_status": False,
+            "api_key": "legacy-key",
+            "voice_id": "legacy-voice",
+            "model_id": "eleven_multilingual_v2",
+        }
+
+        def _read(self, key, expected):
+            if key not in self.old_values:
+                raise TypeError(
+                    'Invalid setting type "%s" for "%s"' % (expected, key)
+                )
+            return self.old_values[key]
+
+        def getBool(self, key):
+            return self._read(key, "boolean")
+
+        def getString(self, key):
+            return self._read(key, "string")
+
+        def getInt(self, key):
+            return self._read(key, "integer")
+
+    @staticmethod
+    def _startup_service(settings):
+        service = ReaderService.__new__(ReaderService)
+        service.settings = settings
+        service.config = {}
+        service.monitor = types.SimpleNamespace(
+            settings_changed=True,
+            abortRequested=lambda: True,
+        )
+        service.worker = types.SimpleNamespace(
+            start=lambda: None,
+            stop=lambda: None,
+            join=lambda timeout=None: None,
+        )
+        service.addon = types.SimpleNamespace(
+            getAddonInfo=lambda key: "0.8.2" if key == "version" else ""
+        )
+        service.subtitles_hidden_by_us = False
+        service.subtitles_were_visible = False
+        return service
+
+    def test_legacy_settings_schema_does_not_crash_service_startup(self):
+        service = self._startup_service(self._LegacySettings())
+        service.run()
+        self.assertTrue(service.config["hide_visible_subtitles"])
+        self.assertEqual(service.config["speech_speed_percent"], 95)
+        self.assertEqual(service.config["voice_profile"], "classic")
+        self.assertFalse(service.config["economy_mode"])
+        self.assertEqual(service.config["filter_level"], "strict")
+        self.assertEqual(service.config["offset"], 0.3)
+
+    def test_valid_new_values_are_preserved_and_bad_values_fall_back(self):
+        class NewSettings(self._LegacySettings):
+            extra = {
+                "hide_visible_subtitles": False,
+                "speech_speed_percent": 70,
+                "voice_profile": "dynamic",
+            }
+
+            def _read(self, key, expected):
+                if key in self.extra:
+                    return self.extra[key]
+                return super()._read(key, expected)
+
+        valid = self._startup_service(NewSettings())
+        valid.reload_settings()
+        self.assertFalse(valid.config["hide_visible_subtitles"])
+        self.assertEqual(valid.config["speech_speed_percent"], 70)
+        self.assertEqual(valid.config["voice_profile"], "dynamic")
+
+        invalid_settings = NewSettings()
+        invalid_settings.extra = {
+            "hide_visible_subtitles": None,
+            "speech_speed_percent": "slow",
+            "voice_profile": object(),
+        }
+        invalid = self._startup_service(invalid_settings)
+        invalid.reload_settings()
+        self.assertTrue(invalid.config["hide_visible_subtitles"])
+        self.assertEqual(invalid.config["speech_speed_percent"], 95)
+        self.assertEqual(invalid.config["voice_profile"], "classic")
+
+
 class ReaderAudioQueueTests(unittest.TestCase):
     @staticmethod
     def _service(generation=1):
