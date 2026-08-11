@@ -22,6 +22,7 @@ from family_filter import soften
 from speech import ElevenLabsClient, SpeechCancelled, SpeechError
 from subtitle_source import SubtitleSource
 from text_normalizer import compress_for_economy, normalize_for_speech
+from usage_worker import UsageJob, UsageWorker
 
 
 ADDON_ID = "service.subtitle.tts.pl"
@@ -250,8 +251,10 @@ class ReaderService:
             cooldown_seconds=30.0,
         )
         self.worker = LatestWorker()
+        self.usage_worker = UsageWorker()
         self.cue_tracker = ActiveCueTracker()
         self.generation = 0
+        self.usage_generation = 0
         self.config = {}
         self.playing_file = ""
         self.last_visible_text = ""
@@ -272,9 +275,14 @@ class ReaderService:
         self.subtitle_audio_source = None
         self.hidden_subtitle_source = None
         self.subtitle_hide_requested_at = None
+        self.usage_request_identity = None
+        self.usage_status_identity = None
+        self.usage_source_key = None
+        self.usage_permission_warned = False
 
     def reload_settings(self):
         old_signature = self._tts_config_signature(self.config)
+        old_usage_signature = self._usage_config_signature(self.config)
         old_config = dict(self.config)
         new_config = {
             "enabled": self.settings.getBool("tts_enabled"),
@@ -304,8 +312,15 @@ class ReaderService:
         }
         self.config = new_config
         self.monitor.settings_changed = False
+        if old_config.get("api_key") != new_config.get("api_key"):
+            self.usage_permission_warned = False
         if old_signature and old_signature != self._tts_config_signature(new_config):
             self.invalidate_audio(stop_sfx=True)
+        if (
+            old_usage_signature
+            and old_usage_signature != self._usage_config_signature(new_config)
+        ):
+            self.invalidate_usage()
         if old_config and (
             not new_config["enabled"]
             or not new_config["hide_visible_subtitles"]
@@ -329,6 +344,24 @@ class ReaderService:
                 "model_id",
                 "speech_speed_percent",
                 "voice_profile",
+            )
+        )
+
+    @staticmethod
+    def _usage_config_signature(config):
+        """Settings that change quota access or the full-track estimate."""
+
+        if not config:
+            return ()
+        return tuple(
+            config.get(key)
+            for key in (
+                "enabled",
+                "api_key",
+                "model_id",
+                "family_mode",
+                "economy_mode",
+                "filter_level",
             )
         )
 
@@ -365,11 +398,34 @@ class ReaderService:
             except Exception:
                 pass
 
+    def invalidate_usage(self):
+        """Cancel quota work only when its film/source/settings identity changed."""
+
+        self.usage_generation = getattr(self, "usage_generation", 0) + 1
+        invalidate_worker = getattr(
+            getattr(self, "usage_worker", None), "invalidate", None
+        )
+        if callable(invalidate_worker):
+            invalidate_worker(self.usage_generation)
+        self.usage_request_identity = None
+        self.usage_status_identity = None
+
+    def _use_usage_source(self, source_key):
+        """Invalidate quota only for a genuinely different subtitle source."""
+
+        if source_key == getattr(self, "usage_source_key", None):
+            return False
+        self.usage_source_key = source_key
+        self.invalidate_usage()
+        return True
+
     def reset_playback(self, playing_file=""):
         self._restore_visible_subtitles()
         self.invalidate_audio(stop_sfx=bool(self.playing_file))
+        self.invalidate_usage()
         self.playing_file = playing_file
         self.source.reset(playing_file)
+        self.usage_source_key = None
         self.playback_started = time.monotonic()
         self.no_source_notified = False
         self.no_key_notified = False
@@ -566,6 +622,121 @@ class ReaderService:
 
         self.source.last_scan = 0.0
 
+    def _maybe_submit_usage(self, source_key):
+        """Queue one full-track quota estimate for this source/generation."""
+
+        if (
+            not source_key
+            or not self.config.get("api_key")
+            or not self.config.get("show_status", True)
+        ):
+            return False
+        worker = getattr(self, "usage_worker", None)
+        selected_track = getattr(getattr(self, "source", None), "selected_track", None)
+        if worker is None or not callable(selected_track):
+            return False
+        usage_generation = getattr(self, "usage_generation", 0)
+        identity = (usage_generation, source_key)
+        if getattr(self, "usage_request_identity", None) == identity:
+            return False
+        track = selected_track(source_key=source_key)
+        cues = tuple(getattr(track, "cues", ()) or ()) if track else ()
+        if not cues:
+            return False
+        # Record the attempt before submit. A busy queue must not make Kodi's
+        # polling loop repeatedly try the same account request.
+        self.usage_request_identity = identity
+        self.usage_status_identity = None
+        submitted = worker.submit(
+            UsageJob(
+                usage_generation,
+                source_key,
+                self.config.get("api_key", ""),
+                self.config.get("model_id", ""),
+                cues,
+                self._prepare_spoken,
+            )
+        )
+        if not submitted:
+            log("Pominięto powtórne zapytanie o limit", xbmc.LOGDEBUG)
+        return bool(submitted)
+
+    @staticmethod
+    def _format_usage_number(value):
+        try:
+            number = max(0, int(value))
+        except (TypeError, ValueError, OverflowError):
+            number = 0
+        return format(number, ",").replace(",", " ")
+
+    def process_usage_results(self):
+        """Display the current source's quota result once, without blocking."""
+
+        worker = getattr(self, "usage_worker", None)
+        results = getattr(worker, "results", None)
+        if results is None:
+            return
+        while True:
+            try:
+                result = results.get_nowait()
+            except queue.Empty:
+                break
+            identity = (result.generation, result.source_key)
+            if result.generation != getattr(self, "usage_generation", 0):
+                continue
+            if identity != getattr(self, "usage_request_identity", None):
+                continue
+            if identity == getattr(self, "usage_status_identity", None):
+                continue
+            self.usage_status_identity = identity
+            if result.error_kind:
+                log("Stan limitu ElevenLabs: %s" % result.error_kind, xbmc.LOGDEBUG)
+                if not self.config.get("show_status", True):
+                    continue
+                if result.error_kind == "missing_user_read":
+                    if getattr(self, "usage_permission_warned", False):
+                        continue
+                    self.usage_permission_warned = True
+                notification(result.user_message, False, 9000)
+                continue
+            estimate = result.estimate
+            subscription = result.subscription
+            if estimate is None or subscription is None:
+                continue
+            film_credits = max(0, int(getattr(estimate, "rounded_credits", 0)))
+            film_characters = max(0, int(getattr(estimate, "text_characters", 0)))
+            remaining = max(0, int(getattr(subscription, "remaining", 0)))
+            quota_is_credits = getattr(subscription, "source_units", "") == "credits"
+            estimated_quota_use = film_credits if quota_is_credits else film_characters
+            remaining_after = subscription.remaining_after(estimated_quota_use)
+            if quota_is_credits:
+                message = (
+                    "Film: ok. %s kred.; pozostało %s; po filmie ok. %s."
+                    % (
+                        self._format_usage_number(film_credits),
+                        self._format_usage_number(remaining),
+                        self._format_usage_number(remaining_after),
+                    )
+                )
+            else:
+                message = (
+                    "Film: %s znaków (ok. %s kred.); limit API: zostało %s, po filmie ok. %s."
+                    % (
+                        self._format_usage_number(film_characters),
+                        self._format_usage_number(film_credits),
+                        self._format_usage_number(remaining),
+                        self._format_usage_number(remaining_after),
+                    )
+                )
+            if estimated_quota_use > remaining:
+                message += " Przekroczy limit wliczony o ok. %s." % self._format_usage_number(
+                    estimated_quota_use - remaining
+                )
+                if getattr(subscription, "max_credit_limit_extension", 0):
+                    message += " Dalsze użycie może korzystać z PAYG lub rozliczenia dodatkowego."
+            if self.config.get("show_status", True):
+                notification(message, False, 10000)
+
     def warn_audio_settings(self):
         if self.audio_warning_shown:
             return
@@ -731,7 +902,9 @@ class ReaderService:
         source_key, contexts = self.source.cues_at(max(0.0, seconds))
         source_changed = self.cue_tracker.use_source(source_key)
         if source_changed:
+            self._use_usage_source(source_key)
             self.invalidate_audio(stop_sfx=True, reset_cues=False)
+        self._maybe_submit_usage(source_key)
         self._observe_subtitle_manual_override(source_key)
         batch = self.cue_tracker.observe(contexts)
         if batch:
@@ -754,6 +927,9 @@ class ReaderService:
     def run(self):
         self.reload_settings()
         self.worker.start()
+        usage_worker = getattr(self, "usage_worker", None)
+        if usage_worker is not None:
+            usage_worker.start()
         log("Uruchomiono wersję %s" % self.addon.getAddonInfo("version"))
         if self.config["show_status"]:
             notification("Uruchomiony — Termux nie jest potrzebny.", False, 4000)
@@ -763,12 +939,16 @@ class ReaderService:
                     self.reload_settings()
                 self.poll_video()
                 self.process_results()
+                self.process_usage_results()
                 if self.monitor.waitForAbort(0.15):
                     break
         finally:
             self._restore_visible_subtitles()
             self.worker.stop()
             self.worker.join(timeout=2.0)
+            if usage_worker is not None:
+                usage_worker.stop()
+                usage_worker.join(timeout=2.0)
             log("Zatrzymano")
 
 

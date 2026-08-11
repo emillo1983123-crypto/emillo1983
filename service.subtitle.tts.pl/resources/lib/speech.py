@@ -107,23 +107,70 @@ class SpeechResult:
 
 
 def _error_message(status, body):
-    detail = ""
+    fields = {}
     try:
         payload = json.loads(body.decode("utf-8", "replace"))
         value = payload.get("detail", payload)
         if isinstance(value, dict):
-            detail = str(value.get("message") or value.get("status") or value.get("code") or "")
+            for key in ("type", "code", "status", "message", "param"):
+                if value.get(key) is not None:
+                    fields[key] = str(value.get(key))
         else:
-            detail = str(value)
+            fields["message"] = str(value)
     except Exception:
-        detail = ""
-    folded = detail.casefold()
-    if status in (401, 403) or "invalid_api_key" in folded or "api key" in folded and "invalid" in folded:
-        return "Klucz API ElevenLabs jest nieprawidłowy. Wpisz nowy klucz w ustawieniach dodatku."
+        fields = {}
+    detail = fields.get("message", "")
+    folded = " ".join(fields.values()).casefold()
     if "exactly 51 characters" in folded or "api_key_length" in folded:
         return "Klucz API ma złą długość. Wklej pełny klucz ElevenLabs bez spacji."
+    if (
+        "quota_exceeded" in folded
+        or "insufficient_credits" in folded
+        or "payment_required" in folded
+    ):
+        return (
+            "Klucz działa, ale konto ElevenLabs nie ma wystarczającej liczby kredytów. "
+            "Sprawdź limit lub oficjalny panel Top Up."
+        )
+    if "voice_not_found" in folded or "invalid_voice_id" in folded:
+        return "Wybranego głosu nie ma już w ElevenLabs. Wybierz inny głos w menu dodatku."
+    if "model_not_found" in folded or "unsupported_model" in folded:
+        return "Wybrany model nie jest dostępny. W ustawieniach wybierz obsługiwany model ElevenLabs."
+    if "max_character_limit_exceeded" in folded or "text_too_long" in folded:
+        return "Tekst jest zbyt długi dla wybranego modelu ElevenLabs."
+    if "voice_access_denied" in folded:
+        return "Klucz działa, ale konto nie ma dostępu do wybranego głosu. Wybierz głos dostępny na tym koncie."
+    if "model_access_denied" in folded or "feature_not_available" in folded:
+        return "Klucz działa, ale wybrany model nie jest dostępny w tym planie ElevenLabs."
+    if "subscription_required" in folded:
+        return "Klucz działa, ale ta funkcja wymaga odpowiedniego planu ElevenLabs."
+    if (
+        status == 403
+        or "authorization_error" in folded
+        or "insufficient_permissions" in folded
+        or "missing_permissions" in folded
+        or "permission" in folded
+        or "forbidden" in folded
+    ):
+        return (
+            "Klucz API działa, ale nie ma dostępu do tej operacji. W uprawnieniach klucza włącz "
+            "„Voices Read” dla listy głosów, „User Read” dla licznika oraz „Text to Speech” "
+            "dla lektora. Jeśli są włączone, sprawdź listę dozwolonych adresów IP."
+        )
+    if (
+        status == 401
+        or "invalid_api_key" in folded
+        or "missing_api_key" in folded
+        or "invalid_authorization_header" in folded
+        or "authentication_error" in folded
+    ):
+        return "Klucz API ElevenLabs jest nieprawidłowy albo wygasł. Wpisz aktywny klucz w ustawieniach dodatku."
+    if status == 402:
+        return "Klucz działa, ale konto ElevenLabs nie ma wystarczającej liczby kredytów lub wymaga płatnego planu."
     if status == 429:
-        return "ElevenLabs chwilowo ograniczył liczbę zapytań albo skończył się limit konta."
+        return "ElevenLabs chwilowo ograniczył liczbę równoczesnych lub zbyt częstych zapytań. Spróbuj ponownie za chwilę."
+    if status == 404 and "voice" in folded:
+        return "Wybranego głosu nie ma już w ElevenLabs. Wybierz inny głos w menu dodatku."
     if status == 422:
         return "ElevenLabs odrzucił głos lub model. Wybierz głos ponownie w menu dodatku."
     if status >= 500:
@@ -176,19 +223,41 @@ class ElevenLabsClient:
             raise SpeechError("Brak połączenia z ElevenLabs. Sprawdź internet w telewizorze.", retryable=True)
 
     def list_voices(self):
-        body = self._request(API_BASE + "/voices")
-        try:
-            payload = json.loads(body.decode("utf-8"))
-            voices = []
-            for item in payload.get("voices", []):
-                voice_id = str(item.get("voice_id", "")).strip()
-                name = str(item.get("name", voice_id)).strip()
-                category = str(item.get("category", "")).strip()
-                if voice_id:
-                    voices.append((name, voice_id, category))
-            return sorted(voices, key=lambda value: value[0].casefold())
-        except (ValueError, TypeError, AttributeError):
-            raise SpeechError("ElevenLabs zwrócił nieprawidłową listę głosów.")
+        # /v2/voices is the current, paginated ElevenLabs endpoint.  The former
+        # /v1/voices endpoint is now part of the legacy API surface.
+        voices = {}
+        next_page_token = ""
+        seen_tokens = set()
+        for _page in range(20):
+            query = {"page_size": 100, "include_total_count": "false"}
+            if next_page_token:
+                query["next_page_token"] = next_page_token
+            url = "https://api.elevenlabs.io/v2/voices?%s" % urllib.parse.urlencode(query)
+            body = self._request(url)
+            try:
+                payload = json.loads(body.decode("utf-8"))
+                items = payload.get("voices", [])
+                if not isinstance(items, list):
+                    raise TypeError("voices is not a list")
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    voice_id = str(item.get("voice_id", "")).strip()
+                    name = str(item.get("name", voice_id)).strip()
+                    category = str(item.get("category", "")).strip()
+                    if voice_id:
+                        voices[voice_id] = (name or voice_id, voice_id, category)
+                if not payload.get("has_more"):
+                    break
+                next_page_token = str(payload.get("next_page_token") or "").strip()
+                if not next_page_token or next_page_token in seen_tokens:
+                    raise TypeError("invalid pagination token")
+                seen_tokens.add(next_page_token)
+            except (ValueError, TypeError, AttributeError):
+                raise SpeechError("ElevenLabs zwrócił nieprawidłową listę głosów.")
+        else:
+            raise SpeechError("Lista głosów ElevenLabs ma zbyt wiele stron. Zawęź listę w panelu ElevenLabs.")
+        return sorted(voices.values(), key=lambda value: value[0].casefold())
 
     def _speech_options(self):
         voice_settings = dict(VOICE_PROFILES[self.voice_profile])

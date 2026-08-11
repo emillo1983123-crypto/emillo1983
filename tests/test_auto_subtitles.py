@@ -10,12 +10,15 @@ sys.path.insert(0, LIB)
 
 from auto_subtitles import (
     ACTIVATE_SUBTITLE_SEARCH,
+    OPENSUBTITLES_COM_ADDON_ID,
     AutoSubtitleSearch,
     JsonRpcError,
     apply_setting_changes,
     build_media_fingerprint,
     build_polish_auto_download_changes,
+    build_subtitle_provider_changes,
     configure_polish_auto_download,
+    find_subtitle_module,
     get_default_subtitle_service,
     is_text_subtitle_path,
     list_subtitle_modules,
@@ -123,6 +126,31 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(rpc.calls[0]["params"]["enabled"], "all")
         self.assertTrue(rpc.calls[0]["params"]["installed"])
 
+    def test_official_opensubtitles_is_matched_by_exact_addon_id(self):
+        modules = [
+            {"id": "service.subtitles.opensubtitles", "name": "legacy"},
+            {
+                "id": OPENSUBTITLES_COM_ADDON_ID,
+                "name": "OpenSubtitles.com",
+                "enabled": True,
+            },
+        ]
+        self.assertEqual(
+            find_subtitle_module(modules)["id"],
+            "service.subtitles.opensubtitles-com",
+        )
+        self.assertIsNone(find_subtitle_module(modules, "service.subtitles.missing"))
+
+    def test_provider_changes_set_movies_tv_polish_and_auto_download(self):
+        changes = build_subtitle_provider_changes(
+            OPENSUBTITLES_COM_ADDON_ID,
+            ["English", "Polish"],
+        )
+        self.assertEqual(changes["subtitles.movie"], OPENSUBTITLES_COM_ADDON_ID)
+        self.assertEqual(changes["subtitles.tv"], OPENSUBTITLES_COM_ADDON_ID)
+        self.assertEqual(changes["subtitles.languages"], ["Polish", "English"])
+        self.assertTrue(changes["subtitles.downloadfirst"])
+
     def test_jsonrpc_errors_are_explicit(self):
         def rejected(_payload):
             return {"error": {"code": -1, "message": "rejected"}}
@@ -176,7 +204,7 @@ class AutoSubtitleSearchTests(unittest.TestCase):
     def _rpc(self, movie="service.subtitles.example", tv="service.subtitles.tv"):
         return JsonRpcStub({"subtitles.movie": movie, "subtitles.tv": tv})
 
-    def test_repeated_avchange_opens_only_once_per_fingerprint(self):
+    def test_repeated_poll_waits_before_one_bounded_retry(self):
         builtins = []
         clock = Clock()
         search = AutoSubtitleSearch(
@@ -184,16 +212,21 @@ class AutoSubtitleSearchTests(unittest.TestCase):
             builtins.append,
             clock=clock,
             cooldown_seconds=10,
+            retry_interval_seconds=30,
+            max_attempts=2,
         )
         first = search.consider("film-1", "movie", False)
         second = search.consider("film-1", "movie", False)
-        clock.value += 100
+        clock.value += 30
         third = search.consider("film-1", "movie", False)
+        clock.value += 30
+        fourth = search.consider("film-1", "movie", False)
 
         self.assertEqual(first.status, "opened")
-        self.assertEqual(second.status, "already_attempted")
-        self.assertEqual(third.status, "already_attempted")
-        self.assertEqual(builtins, [ACTIVATE_SUBTITLE_SEARCH])
+        self.assertEqual(second.status, "retry_wait")
+        self.assertEqual(third.status, "opened")
+        self.assertEqual(fourth.status, "max_attempts")
+        self.assertEqual(builtins, [ACTIVATE_SUBTITLE_SEARCH] * 2)
 
     def test_existing_text_file_prevents_search_but_does_not_poison_item(self):
         builtins = []
@@ -203,6 +236,53 @@ class AutoSubtitleSearchTests(unittest.TestCase):
         self.assertEqual(available.status, "text_available")
         self.assertEqual(missing_later.status, "opened")
         self.assertEqual(builtins, [ACTIVATE_SUBTITLE_SEARCH])
+
+    def test_first_miss_then_eventual_text_success_stops_retry(self):
+        builtins = []
+        clock = Clock()
+        search = AutoSubtitleSearch(
+            self._rpc(),
+            builtins.append,
+            clock=clock,
+            cooldown_seconds=0,
+            retry_interval_seconds=20,
+            max_attempts=3,
+        )
+        self.assertEqual(search.consider("film-ok", "movie", False).status, "opened")
+        clock.value += 20
+        self.assertEqual(search.consider("film-ok", "movie", False).status, "opened")
+        self.assertEqual(
+            search.consider("film-ok", "movie", True).status,
+            "text_available",
+        )
+        clock.value += 100
+        self.assertEqual(
+            search.consider("film-ok", "movie", False).status,
+            "already_found",
+        )
+        self.assertEqual(builtins, [ACTIVATE_SUBTITLE_SEARCH] * 2)
+
+    def test_max_attempts_prevents_popup_loop(self):
+        builtins = []
+        clock = Clock()
+        search = AutoSubtitleSearch(
+            self._rpc(),
+            builtins.append,
+            clock=clock,
+            cooldown_seconds=0,
+            retry_interval_seconds=5,
+            max_attempts=2,
+        )
+        self.assertEqual(search.consider("film-no", "movie", False).status, "opened")
+        clock.value += 5
+        self.assertEqual(search.consider("film-no", "movie", False).status, "opened")
+        for _index in range(5):
+            clock.value += 100
+            self.assertEqual(
+                search.consider("film-no", "movie", False).status,
+                "max_attempts",
+            )
+        self.assertEqual(builtins, [ACTIVATE_SUBTITLE_SEARCH] * 2)
 
     def test_cooldown_delays_new_item_without_marking_it_attempted(self):
         builtins = []

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 
 ACTIVATE_SUBTITLE_SEARCH = "ActivateWindow(subtitlesearch)"
+ACTIVATE_ADDON_BROWSER = "ActivateWindow(addonbrowser)"
+OPENSUBTITLES_COM_ADDON_ID = "service.subtitles.opensubtitles-com"
 DEFAULT_SERVICE_SETTINGS = {
     "movie": "subtitles.movie",
     "tv": "subtitles.tv",
@@ -187,6 +189,18 @@ def build_polish_auto_download_changes(current_languages=None):
     }
 
 
+def build_subtitle_provider_changes(addon_id, current_languages=None):
+    """Build the explicit Kodi changes for one preferred subtitle provider."""
+
+    addon_id = str(addon_id or "").strip()
+    if not addon_id:
+        raise ValueError("Brak identyfikatora dostawcy napisów")
+    changes = build_polish_auto_download_changes(current_languages)
+    changes["subtitles.movie"] = addon_id
+    changes["subtitles.tv"] = addon_id
+    return changes
+
+
 def configure_polish_auto_download(jsonrpc):
     """Explicitly enable Polish and Kodi's ``subtitles.downloadfirst`` option.
 
@@ -233,6 +247,20 @@ def list_subtitle_modules(jsonrpc, enabled="all"):
             }
         )
     return sorted(modules, key=lambda item: (item["name"].casefold(), item["id"]))
+
+
+def find_subtitle_module(modules, addon_id=OPENSUBTITLES_COM_ADDON_ID):
+    """Return an installed provider matching ``addon_id`` exactly."""
+
+    wanted = str(addon_id or "").strip().casefold()
+    if not wanted:
+        return None
+    for module in modules or ():
+        if not isinstance(module, dict):
+            continue
+        if str(module.get("id") or "").strip().casefold() == wanted:
+            return module
+    return None
 
 
 def is_text_subtitle_path(path):
@@ -291,11 +319,13 @@ def build_media_fingerprint(
 
 
 class AutoSubtitleSearch:
-    """Open Kodi subtitle search at most once for each media fingerprint.
+    """Open Kodi subtitle search a bounded number of times per media item.
 
     ``consider`` is safe to call from repeated AVChange notifications.  A
     fingerprint is remembered before the builtin is executed, so even a Kodi
-    error cannot create a rapid retry loop.
+    error cannot create a rapid retry loop.  A second attempt is allowed only
+    after ``retry_interval_seconds`` and no more than ``max_attempts`` search
+    windows are opened for one fingerprint.
     """
 
     def __init__(
@@ -305,6 +335,8 @@ class AutoSubtitleSearch:
         notify=None,
         clock=None,
         cooldown_seconds=30.0,
+        retry_interval_seconds=45.0,
+        max_attempts=2,
         history_size=256,
     ):
         if not callable(jsonrpc):
@@ -316,6 +348,8 @@ class AutoSubtitleSearch:
         self._notify = notify
         self._clock = clock or time.monotonic
         self._cooldown = max(0.0, float(cooldown_seconds))
+        self._retry_interval = max(0.0, float(retry_interval_seconds))
+        self._max_attempts = max(1, int(max_attempts))
         self._history_size = max(1, int(history_size))
         self._attempted = OrderedDict()
         self._last_opened_at = None
@@ -324,9 +358,13 @@ class AutoSubtitleSearch:
     def attempted_fingerprints(self):
         return tuple(self._attempted.keys())
 
-    def _remember(self, fingerprint, status):
+    def _remember(self, fingerprint, status, attempts=0, last_attempt_at=None):
         self._attempted.pop(fingerprint, None)
-        self._attempted[fingerprint] = status
+        self._attempted[fingerprint] = {
+            "status": status,
+            "attempts": max(0, int(attempts)),
+            "last_attempt_at": last_attempt_at,
+        }
         while len(self._attempted) > self._history_size:
             self._attempted.popitem(last=False)
 
@@ -343,6 +381,14 @@ class AutoSubtitleSearch:
 
         fingerprint = str(fingerprint or "").strip()
         if text_subtitle_available:
+            previous = self._attempted.get(fingerprint)
+            if previous and previous.get("attempts", 0):
+                self._remember(
+                    fingerprint,
+                    "text_available",
+                    previous["attempts"],
+                    previous.get("last_attempt_at"),
+                )
             return AutoSubtitleResult(
                 "text_available",
                 "Tekstowy plik napisów jest już dostępny.",
@@ -353,17 +399,45 @@ class AutoSubtitleSearch:
                 "invalid_fingerprint",
                 "Nie można uruchomić wyszukiwania bez identyfikatora materiału.",
             )
-        if fingerprint in self._attempted:
-            return AutoSubtitleResult(
-                "already_attempted",
-                "Wyszukiwanie napisów dla tego materiału było już uruchamiane.",
-                fingerprint,
-            )
+        previous = self._attempted.get(fingerprint)
+        now = float(self._clock())
+        if previous:
+            if previous["status"] == "text_available":
+                return AutoSubtitleResult(
+                    "already_found",
+                    "Napisy dla tego materiału zostały już znalezione.",
+                    fingerprint,
+                )
+            if previous["status"] != "opened":
+                return AutoSubtitleResult(
+                    "already_attempted",
+                    "Wyszukiwanie napisów dla tego materiału zostało zakończone.",
+                    fingerprint,
+                )
+            if previous["attempts"] >= self._max_attempts:
+                return AutoSubtitleResult(
+                    "max_attempts",
+                    "Kodi nie znalazło napisów po %s próbach. Możesz wyszukać je ręcznie."
+                    % self._max_attempts,
+                    fingerprint,
+                )
+            last_attempt_at = previous.get("last_attempt_at")
+            if last_attempt_at is not None:
+                remaining = self._retry_interval - (now - last_attempt_at)
+                if remaining > 0:
+                    return AutoSubtitleResult(
+                        "retry_wait",
+                        "Ponowne wyszukiwanie napisów będzie dostępne za %.1f s."
+                        % remaining,
+                        fingerprint,
+                        retry_after=remaining,
+                    )
 
         try:
             service = get_default_subtitle_service(self._jsonrpc, media_kind)
         except (JsonRpcError, ValueError) as exc:
-            self._remember(fingerprint, "configuration_error")
+            attempts = previous["attempts"] if previous else 0
+            self._remember(fingerprint, "configuration_error", attempts)
             return self._announce(
                 AutoSubtitleResult(
                     "configuration_error",
@@ -373,7 +447,8 @@ class AutoSubtitleSearch:
             )
 
         if not service:
-            self._remember(fingerprint, "no_service")
+            attempts = previous["attempts"] if previous else 0
+            self._remember(fingerprint, "no_service", attempts)
             return self._announce(
                 AutoSubtitleResult(
                     "no_service",
@@ -382,7 +457,6 @@ class AutoSubtitleSearch:
                 )
             )
 
-        now = float(self._clock())
         if self._last_opened_at is not None:
             remaining = self._cooldown - (now - self._last_opened_at)
             if remaining > 0:
@@ -395,11 +469,12 @@ class AutoSubtitleSearch:
                 )
 
         # Remember before invoking Kodi.  This prevents an AVChange/error loop.
-        self._remember(fingerprint, "attempting")
+        attempts = (previous["attempts"] if previous else 0) + 1
+        self._remember(fingerprint, "attempting", attempts, now)
         try:
             self._execute_builtin(ACTIVATE_SUBTITLE_SEARCH)
         except Exception as exc:
-            self._attempted[fingerprint] = "builtin_error"
+            self._remember(fingerprint, "builtin_error", attempts, now)
             return self._announce(
                 AutoSubtitleResult(
                     "builtin_error",
@@ -409,12 +484,14 @@ class AutoSubtitleSearch:
                 )
             )
 
-        self._attempted[fingerprint] = "opened"
+        self._remember(fingerprint, "opened", attempts, now)
         self._last_opened_at = now
+        action = "Ponowiono" if attempts > 1 else "Otwarto"
         return self._announce(
             AutoSubtitleResult(
                 "opened",
-                "Otwarto oficjalne okno wyszukiwania napisów Kodi (%s)." % service,
+                "%s oficjalne okno wyszukiwania napisów Kodi (%s), próba %s/%s."
+                % (action, service, attempts, self._max_attempts),
                 fingerprint,
                 service,
             )
