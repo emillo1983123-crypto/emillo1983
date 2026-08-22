@@ -9,7 +9,7 @@ import re
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import xbmc
 import xbmcaddon
@@ -19,7 +19,11 @@ import xbmcvfs
 from auto_subtitles import AutoSubtitleSearch, build_media_fingerprint
 from cue_tracker import ActiveCueTracker
 from family_filter import soften
-from speech import ElevenLabsClient, SpeechCancelled, SpeechError
+from kodi_tts import deliver as deliver_kodi_tts
+from kodi_tts import is_available as kodi_tts_available
+from kodi_tts import stop as stop_kodi_tts
+from provider_factory import configured_provider_id, create_speech_provider
+from speech import SpeechCancelled, SpeechError
 from subtitle_source import SubtitleSource
 from text_normalizer import compress_for_economy, normalize_for_speech
 from usage_worker import UsageJob, UsageWorker
@@ -97,11 +101,21 @@ def _safe_new_profile(settings, setting_id, default="classic"):
     return value if value in VOICE_PROFILE_KEYS else default
 
 
+def _safe_new_string(settings, setting_id, default=""):
+    """Read optional migration settings without failing a Kodi hot update."""
+
+    try:
+        value = settings.getString(setting_id)
+    except Exception:
+        return default
+    return value.strip() if isinstance(value, str) else default
+
+
 @dataclass(frozen=True)
 class Job:
     text: str
     created: float
-    api_key: str
+    api_key: str = field(repr=False)
     voice_id: str
     model_id: str
     cache_dir: str
@@ -112,6 +126,7 @@ class Job:
     economy_mode: bool = False
     speech_speed_percent: int = 95
     voice_profile: str = "classic"
+    provider_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -162,18 +177,20 @@ class LatestWorker(threading.Thread):
                 continue
             if job.generation != self.latest_generation:
                 continue
-            client = ElevenLabsClient(
-                job.api_key,
-                job.voice_id,
-                job.model_id,
-                job.cache_dir,
-                speech_speed_percent=job.speech_speed_percent,
-                voice_profile=job.voice_profile,
-            )
             cancelled = lambda: (
                 self.stopping.is_set() or job.generation != self.latest_generation
             )
+            client = None
             try:
+                client = create_speech_provider(
+                    job.provider_id,
+                    job.api_key,
+                    job.voice_id,
+                    job.model_id,
+                    job.cache_dir,
+                    speech_speed_percent=job.speech_speed_percent,
+                    voice_profile=job.voice_profile,
+                )
                 audio = client.synthesize(
                     job.text,
                     job.previous_text,
@@ -185,7 +202,12 @@ class LatestWorker(threading.Thread):
             except SpeechCancelled:
                 continue
             except SpeechError as exc:
-                if exc.retryable and time.monotonic() - job.created < 7.0 and not self.stopping.wait(0.8):
+                if (
+                    client is not None
+                    and exc.retryable
+                    and time.monotonic() - job.created < 7.0
+                    and not self.stopping.wait(0.8)
+                ):
                     try:
                         audio = client.synthesize(
                             job.text,
@@ -265,6 +287,7 @@ class ReaderService:
         self.playback_started = 0.0
         self.no_source_notified = False
         self.no_key_notified = False
+        self.no_tts_service_notified = False
         self.audio_warning_shown = False
         self.last_errors = {}
         self.last_player_time = None
@@ -291,14 +314,15 @@ class ReaderService:
                 self.settings, "hide_visible_subtitles", True
             ),
             "family_mode": self.settings.getBool("family_mode"),
-            "economy_mode": self.settings.getBool("economy_mode"),
+            "economy_mode": _safe_new_bool(self.settings, "economy_mode", True),
             "filter_level": self.settings.getString("filter_level") or "family",
             "offset": self.settings.getInt("subtitle_offset_ms") / 1000.0,
             "min_gap": self.settings.getInt("min_gap_ms") / 1000.0,
             "show_status": self.settings.getBool("show_status"),
-            "api_key": self.settings.getString("api_key").strip(),
-            "voice_id": self.settings.getString("voice_id").strip(),
-            "model_id": self.settings.getString("model_id").strip() or "eleven_flash_v2_5",
+            "provider_id": configured_provider_id(self.settings),
+            "api_key": _safe_new_string(self.settings, "api_key"),
+            "voice_id": _safe_new_string(self.settings, "voice_id"),
+            "model_id": _safe_new_string(self.settings, "model_id") or "eleven_flash_v2_5",
             "speech_speed_percent": _safe_new_int(
                 self.settings,
                 "speech_speed_percent",
@@ -324,7 +348,10 @@ class ReaderService:
         if old_config and (
             not new_config["enabled"]
             or not new_config["hide_visible_subtitles"]
-            or not new_config["api_key"]
+            or (
+                new_config.get("provider_id") == "elevenlabs"
+                and not new_config["api_key"]
+            )
         ):
             self._restore_visible_subtitles()
 
@@ -339,6 +366,7 @@ class ReaderService:
                 "family_mode",
                 "economy_mode",
                 "filter_level",
+                "provider_id",
                 "api_key",
                 "voice_id",
                 "model_id",
@@ -357,6 +385,7 @@ class ReaderService:
             config.get(key)
             for key in (
                 "enabled",
+                "provider_id",
                 "api_key",
                 "model_id",
                 "family_mode",
@@ -397,6 +426,8 @@ class ReaderService:
                 xbmc.stopSFX()
             except Exception:
                 pass
+            if getattr(self, "config", {}).get("provider_id") == "kodi_tts":
+                stop_kodi_tts()
 
     def invalidate_usage(self):
         """Cancel quota work only when its film/source/settings identity changed."""
@@ -429,6 +460,7 @@ class ReaderService:
         self.playback_started = time.monotonic()
         self.no_source_notified = False
         self.no_key_notified = False
+        self.no_tts_service_notified = False
         self.audio_warning_shown = False
         self.last_player_time = None
         self.last_player_clock = None
@@ -596,7 +628,7 @@ class ReaderService:
     def _maybe_open_subtitle_search(self, current_file, now=None):
         """Open official search once after the text-source grace period."""
 
-        if not self.config.get("enabled") or not self.config.get("api_key"):
+        if not self.config.get("enabled"):
             return None
         if not self.config.get("auto_subtitles"):
             return None
@@ -627,6 +659,7 @@ class ReaderService:
 
         if (
             not source_key
+            or self.config.get("provider_id") != "elevenlabs"
             or not self.config.get("api_key")
             or not self.config.get("show_status", True)
         ):
@@ -655,6 +688,7 @@ class ReaderService:
                 self.config.get("model_id", ""),
                 cues,
                 self._prepare_spoken,
+                self.config.get("provider_id", ""),
             )
         )
         if not submitted:
@@ -780,6 +814,7 @@ class ReaderService:
                 economy_mode,
                 self.config.get("speech_speed_percent", 95),
                 self.config.get("voice_profile", "classic"),
+                self.config.get("provider_id", ""),
             )
         if self.worker.submit(job) is False:
             if cue_ids:
@@ -830,7 +865,13 @@ class ReaderService:
             source_key = getattr(getattr(self, "cue_tracker", None), "source_key", None)
             hidden_for_attempt = self._hide_visible_subtitles_for_audio(source_key)
             try:
-                xbmc.playSFX(result.audio.path, False)
+                delivery = getattr(result.audio, "delivery", "audio_file")
+                if delivery == "kodi_tts":
+                    deliver_kodi_tts(getattr(result.audio, "text", ""))
+                elif delivery == "audio_file":
+                    xbmc.playSFX(result.audio.path, False)
+                else:
+                    raise SpeechError("Nieobsługiwany sposób odtworzenia głosu.")
                 self.subtitle_audio_source = source_key
                 if getattr(self, "subtitles_hidden_by_us", False):
                     self.hidden_subtitle_source = source_key
@@ -838,8 +879,8 @@ class ReaderService:
             except Exception as exc:
                 if hidden_for_attempt:
                     self._restore_visible_subtitles()
-                log("Nie można odtworzyć WAV: %s" % exc, xbmc.LOGERROR)
-                notification("Kodi nie odtworzył próbki WAV. Sprawdź ustawienia dźwięku.", True)
+                log("Nie można odtworzyć głosu: %s" % exc, xbmc.LOGERROR)
+                notification("Kodi nie uruchomił głosu. Sprawdź silnik TTS i ustawienia dźwięku.", True)
 
     def poll_video(self):
         try:
@@ -870,11 +911,21 @@ class ReaderService:
         if not self.config["enabled"]:
             self._restore_visible_subtitles()
             return
-        if not self.config["api_key"]:
+        if self.config.get("provider_id") == "elevenlabs" and not self.config["api_key"]:
             self._restore_visible_subtitles()
             if not self.no_key_notified:
                 self.no_key_notified = True
                 notification("Wpisz klucz API ElevenLabs w ustawieniach Kodi Lektor PL.", True, 8000)
+            return
+        if self.config.get("provider_id") == "kodi_tts" and not kodi_tts_available():
+            self._restore_visible_subtitles()
+            if not self.no_tts_service_notified:
+                self.no_tts_service_notified = True
+                notification(
+                    "Brak kompatybilnego darmowego silnika TTS. Zainstaluj i włącz usługę TTS w Kodi, potem uruchom test głosu.",
+                    True,
+                    10000,
+                )
             return
         self.warn_audio_settings()
         try:

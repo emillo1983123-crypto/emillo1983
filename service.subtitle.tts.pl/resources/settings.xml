@@ -59,52 +59,21 @@
     </category>
     <category id="speech" label="32030" help="32130">
       <group id="2" label="32031">
-        <setting id="api_key" type="string" label="32020" help="32120">
+        <setting id="speech_provider" type="string" label="32035" help="32135">
           <level>0</level>
-          <default/>
-          <constraints><allowempty>true</allowempty></constraints>
-          <control type="edit" format="string"><heading>32020</heading><hidden>true</hidden></control>
-        </setting>
-        <setting id="voice_id" type="string" label="32021" help="32121">
-          <level>0</level>
-          <default>pNInz6obpgDQGcFmaJgB</default>
-          <constraints><allowempty>false</allowempty></constraints>
-          <control type="edit" format="string"><heading>32021</heading></control>
-        </setting>
-        <setting id="voice_profile" type="string" label="32027" help="32127">
-          <level>0</level>
-          <default>classic</default>
+          <default>kodi_tts</default>
           <constraints>
             <options>
-              <option label="32028">classic</option>
-              <option label="32029">warm</option>
-              <option label="32033">natural</option>
-              <option label="32034">dynamic</option>
+              <option label="32036">kodi_tts</option>
             </options>
           </constraints>
-          <control type="list" format="string"><heading>32027</heading></control>
+          <control type="list" format="string"><heading>32035</heading></control>
         </setting>
         <setting id="speech_speed_percent" type="integer" label="32032" help="32132">
           <level>0</level>
           <default>95</default>
           <constraints><minimum>70</minimum><step>5</step><maximum>120</maximum></constraints>
           <control type="slider" format="integer"><popup>true</popup></control>
-        </setting>
-        <setting id="model_id" type="string" label="32022" help="32122">
-          <level>1</level>
-          <default>eleven_flash_v2_5</default>
-          <constraints>
-            <options>
-              <option label="32023">eleven_flash_v2_5</option>
-              <option label="32024">eleven_multilingual_v2</option>
-            </options>
-          </constraints>
-          <control type="list" format="string"><heading>32022</heading></control>
-        </setting>
-        <setting id="economy_mode" type="boolean" label="32025" help="32125">
-          <level>0</level>
-          <default>true</default>
-          <control type="toggle"/>
         </setting>
       </group>
     </category>

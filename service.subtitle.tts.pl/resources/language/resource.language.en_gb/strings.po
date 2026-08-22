@@ -94,14 +94,22 @@ msgstr ""
 
 msgctxt "#32030"
 msgid "Voice and API"
-msgstr ""
+msgstr "Free device voice"
 
 msgctxt "#32031"
 msgid "ElevenLabs"
-msgstr ""
+msgstr "Speech engine"
 
 msgctxt "#32032"
 msgid "Speech speed (%)"
+msgstr ""
+
+msgctxt "#32035"
+msgid "Speech provider"
+msgstr ""
+
+msgctxt "#32036"
+msgid "Free device voice (Kodi TTS)"
 msgstr ""
 
 msgctxt "#32033"
@@ -170,10 +178,14 @@ msgstr ""
 
 msgctxt "#32130"
 msgid "Speech provider configuration"
-msgstr ""
+msgstr "Free device voice configuration"
 
 msgctxt "#32132"
 msgid "Adjusts narration speed from 70 to 120 percent. The recommended calm setting is 95 percent."
+msgstr "Sets the expected narration queue speed from 70 to 120 percent. The device TTS engine selects its actual speech rate."
+
+msgctxt "#32135"
+msgid "Selects the local free speech hand-off. No key or cloud account is used."
 msgstr ""
 
 msgctxt "#32200"

@@ -134,6 +134,94 @@ class ReaderGenerationTests(unittest.TestCase):
         self.assertIsNone(service.cue_tracker.source_key)
         self.assertEqual(stopped, [True])
 
+    def test_job_repr_never_exposes_api_key(self):
+        secret = "sekretny-klucz-elevenlabs"
+        job = Job(
+            "Tekst",
+            time.monotonic(),
+            secret,
+            "voice",
+            "model",
+            "cache",
+            provider_id="elevenlabs",
+        )
+        self.assertNotIn(secret, repr(job))
+
+
+class ReaderProviderBoundaryTests(unittest.TestCase):
+    @staticmethod
+    def _stop(worker):
+        worker.stop()
+        worker.join(timeout=2.0)
+
+    def test_unknown_provider_returns_safe_result_without_creating_client(self):
+        worker = LatestWorker()
+        worker.start()
+        original = reader_service.create_speech_provider
+        calls = []
+
+        def guarded_factory(provider_id, *args, **kwargs):
+            calls.append(provider_id)
+            return original(provider_id, *args, **kwargs)
+
+        reader_service.create_speech_provider = guarded_factory
+        job = Job(
+            "Tekst",
+            time.monotonic(),
+            "sekretny-klucz",
+            "voice",
+            "model",
+            "cache",
+            generation=1,
+            provider_id="unknown-provider",
+        )
+        try:
+            self.assertTrue(worker.submit(job))
+            result = worker.results.get(timeout=2.0)
+        finally:
+            reader_service.create_speech_provider = original
+            self._stop(worker)
+
+        self.assertEqual(calls, ["unknown-provider"])
+        self.assertIsNone(result.audio)
+        self.assertIsInstance(result.error, reader_service.SpeechError)
+        self.assertFalse(result.error.retryable)
+        self.assertNotIn("sekretny-klucz", repr(job))
+        self.assertNotIn("unknown-provider", result.error.user_message)
+
+    def test_retryable_factory_error_is_reported_without_using_unassigned_client(self):
+        worker = LatestWorker()
+        worker.start()
+        original = reader_service.create_speech_provider
+        calls = []
+
+        def failing_factory(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise reader_service.SpeechError(
+                "Dostawca chwilowo niedostępny.", retryable=True
+            )
+
+        reader_service.create_speech_provider = failing_factory
+        job = Job(
+            "Tekst",
+            time.monotonic(),
+            "key",
+            "voice",
+            "model",
+            "cache",
+            generation=1,
+        )
+        try:
+            self.assertTrue(worker.submit(job))
+            result = worker.results.get(timeout=2.0)
+        finally:
+            reader_service.create_speech_provider = original
+            self._stop(worker)
+
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(result.audio)
+        self.assertEqual(result.error.user_message, "Dostawca chwilowo niedostępny.")
+
 
 class ReaderHotUpdateSettingsTests(unittest.TestCase):
     class _LegacySettings:
@@ -403,6 +491,7 @@ class ReaderEconomyTests(unittest.TestCase):
         }
         speed = dict(base, speech_speed_percent=90)
         profile = dict(base, voice_profile="natural")
+        provider = dict(base, provider_id="kwpj")
         self.assertNotEqual(
             ReaderService._tts_config_signature(base),
             ReaderService._tts_config_signature(speed),
@@ -410,6 +499,10 @@ class ReaderEconomyTests(unittest.TestCase):
         self.assertNotEqual(
             ReaderService._tts_config_signature(base),
             ReaderService._tts_config_signature(profile),
+        )
+        self.assertNotEqual(
+            ReaderService._tts_config_signature(base),
+            ReaderService._tts_config_signature(provider),
         )
 
 
@@ -574,16 +667,20 @@ class ReaderAutoSubtitleTests(unittest.TestCase):
             reader_service.xbmc.getCondVisibility = original
         self.assertEqual(live.auto_builtin_calls, [])
 
-    def test_disabled_tts_missing_key_and_disabled_option_block_search(self):
+    def test_disabled_tts_and_disabled_option_block_search_but_free_mode_needs_no_key(self):
         for changed in (
             {"enabled": False},
-            {"api_key": ""},
             {"auto_subtitles": False},
         ):
             service = self._service()
             service.config.update(changed)
             self._poll_without_notifications(service)
             self.assertEqual(service.auto_builtin_calls, [])
+
+        free = self._service()
+        free.config["api_key"] = ""
+        self._poll_without_notifications(free)
+        self.assertEqual(free.auto_builtin_calls, ["ActivateWindow(subtitlesearch)"])
 
     def test_new_file_performs_full_reset_and_restarts_grace_period(self):
         service = self._service("smb://server/old.mkv")

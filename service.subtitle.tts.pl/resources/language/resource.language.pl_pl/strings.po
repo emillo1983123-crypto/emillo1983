@@ -75,7 +75,7 @@ msgstr "Multilingual v2 — wysoka jakość"
 
 msgctxt "#32025"
 msgid "Save ElevenLabs credits"
-msgstr "Oszczędzaj kredyty ElevenLabs"
+msgstr "Skracaj oczywiste powtórzenia w tekście"
 
 msgctxt "#32026"
 msgid "Hide on-screen subtitles while the reader is active"
@@ -95,15 +95,23 @@ msgstr "Ciepły dokumentalny"
 
 msgctxt "#32030"
 msgid "Voice and API"
-msgstr "Głos i API"
+msgstr "Darmowy głos urządzenia"
 
 msgctxt "#32031"
 msgid "ElevenLabs"
-msgstr "ElevenLabs"
+msgstr "Silnik mowy"
 
 msgctxt "#32032"
 msgid "Speech speed (%)"
 msgstr "Tempo lektora (%)"
+
+msgctxt "#32035"
+msgid "Speech provider"
+msgstr "Źródło głosu"
+
+msgctxt "#32036"
+msgid "Free device voice (Kodi TTS)"
+msgstr "Darmowy głos urządzenia (Kodi TTS)"
 
 msgctxt "#32033"
 msgid "Natural"
@@ -159,7 +167,7 @@ msgstr "Flash jest szybszy; Multilingual zwykle brzmi naturalniej"
 
 msgctxt "#32125"
 msgid "Shortens only redundant speech, avoids repeated generations and omits request context; Flash uses fewer credits"
-msgstr "Skraca tylko zbędne powtórzenia, unika ponownej syntezy i pomija kontekst zapytania; Flash zużywa mniej kredytów"
+msgstr "Skraca tylko oczywiste powtórzenia, aby lektor mówił zwięźlej"
 
 msgctxt "#32126"
 msgid "Keeps the subtitle file selected for narration, but hides its text over the movie"
@@ -171,11 +179,15 @@ msgstr "Wybiera styl narracji. Niski ton zależy od legalnego głosu ElevenLabs 
 
 msgctxt "#32130"
 msgid "Speech provider configuration"
-msgstr "Konfiguracja dostawcy głosu"
+msgstr "Konfiguracja darmowego głosu urządzenia"
 
 msgctxt "#32132"
 msgid "Adjusts narration speed from 70 to 120 percent. The recommended calm setting is 95 percent."
-msgstr "Reguluje tempo lektora od 70 do 120 procent. Zalecane spokojne ustawienie to 95 procent."
+msgstr "Ustawia zakładane tempo kolejki od 70 do 120 procent. Zalecane spokojne ustawienie to 95 procent. Faktyczne tempo wybiera silnik TTS urządzenia."
+
+msgctxt "#32135"
+msgid "Selects the local free speech hand-off. No key or cloud account is used."
+msgstr "Wybiera lokalny darmowy głos. Nie używa klucza ani konta w chmurze."
 
 msgctxt "#32200"
 msgid "How to get an ElevenLabs API key"
