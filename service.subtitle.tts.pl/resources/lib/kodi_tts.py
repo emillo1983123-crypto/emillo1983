@@ -1,11 +1,8 @@
-"""Free speech hand-off for a compatible Kodi device TTS service.
+"""Free speech hand-off for the local KWPJ Voice Bridge.
 
-Kodi itself does not include a cross-platform API that returns a WAV from the
-operating system's speech engine.  The small ``service.xbmc.tts`` protocol is
-the established Kodi add-on contract for that job: the receiving service
-chooses the voice installed on the device and plays it through the normal
-audio output.  This module deliberately does *not* download a voice, send text
-to a cloud service, or silently fall back to a paid provider.
+Kodi itself cannot invoke Android's TextToSpeech API. The KWPJ Voice OS
+companion exposes a loopback-only bridge on the same television, using the
+Polish voice installed in Android. Nothing is sent to a cloud service.
 
 The client only prepares a result in the worker thread.  ``deliver`` is called
 later by the Kodi main service thread, which avoids invoking Kodi GUI APIs from
@@ -15,14 +12,18 @@ a background thread.
 from __future__ import unicode_literals
 
 import json
+try:
+    from urllib.request import Request, urlopen
+except ImportError:  # pragma: no cover
+    from urllib2 import Request, urlopen
 
 from speech import SpeechCancelled, SpeechError, SpeechResult
 from text_normalizer import compress_for_economy, normalize_for_speech
 
 
-TTS_SERVICE_ADDON_ID = "service.xbmc.tts"
-TTS_NOTIFICATION_SENDER = "service.xbmc.tts"
-TTS_NOTIFICATION_METHOD = "SAY"
+BRIDGE_BASE_URL = "http://127.0.0.1:8765"
+BRIDGE_HEALTH_URL = BRIDGE_BASE_URL + "/health"
+BRIDGE_SPEAK_URL = BRIDGE_BASE_URL + "/speak"
 
 
 def _clamp_speed(value):
@@ -42,28 +43,26 @@ def _estimated_duration(text, speed_percent):
     return max(0.7, (words / words_per_second) + 0.25)
 
 
-def is_available(condition=None):
-    """Check only whether a compatible Kodi TTS service is installed.
-
-    The result cannot certify a particular voice; that belongs to the device
-    and the service's own settings.  It is nevertheless enough to prevent the
-    silent no-op that previously looked like a working narrator.
-    """
-
-    if condition is None:
-        try:
-            import xbmc
-
-            condition = xbmc.getCondVisibility
-        except Exception:
-            return False
+def _read_json(response):
     try:
-        return bool(condition("System.HasAddon(%s)" % TTS_SERVICE_ADDON_ID))
+        return json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return {}
+
+
+def is_available(opener=None):
+    """Return whether KWPJ Voice OS is running on this television."""
+
+    if opener is None:
+        opener = urlopen
+    try:
+        response = opener(BRIDGE_HEALTH_URL, timeout=0.35)
+        return bool(_read_json(response).get("ready"))
     except Exception:
         return False
 
 
-def _notification_command(text, interrupt=False):
+def _bridge_request(text, interrupt=False):
     if not isinstance(text, str) or not text.strip():
         raise SpeechError("Brak tekstu do przeczytania.")
     payload = json.dumps(
@@ -71,49 +70,37 @@ def _notification_command(text, interrupt=False):
         ensure_ascii=True,
         separators=(",", ":"),
     )
-    return "NotifyAll(%s,%s,%s)" % (
-        TTS_NOTIFICATION_SENDER,
-        TTS_NOTIFICATION_METHOD,
-        payload,
+    return Request(
+        BRIDGE_SPEAK_URL,
+        data=payload.encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
 
 
-def deliver(text, interrupt=False, execute_builtin=None):
-    """Ask the installed TTS service to say ``text`` on the device."""
+def deliver(text, interrupt=False, opener=None):
+    """Hand a subtitle line to KWPJ Voice OS on the same television."""
 
-    if execute_builtin is None:
-        try:
-            import xbmc
-
-            execute_builtin = xbmc.executebuiltin
-        except Exception as exc:
-            raise SpeechError("Kodi nie udostępnia darmowego silnika mowy.") from exc
-    if not callable(execute_builtin):
-        raise SpeechError("Kodi nie udostępnia darmowego silnika mowy.")
-    command = _notification_command(text, interrupt)
+    if opener is None:
+        opener = urlopen
+    request = _bridge_request(text, interrupt)
     try:
-        execute_builtin(command)
+        response = opener(request, timeout=0.75)
+        if not bool(_read_json(response).get("ready")):
+            raise SpeechError("Polski głos KWPJ nie jest jeszcze gotowy.")
     except Exception as exc:
-        raise SpeechError("Kodi nie przekazał tekstu do darmowego silnika mowy.") from exc
-    return command
+        if isinstance(exc, SpeechError):
+            raise
+        raise SpeechError(
+            "Nie widzę KWPJ Voice OS. Otwórz aplikację KWPJ na telewizorze "
+            "i wybierz Włącz głos dla Kodi."
+        ) from exc
+    return True
 
 
-def stop(execute_builtin=None):
-    """Cancel queued device speech when a film is paused, changed, or sought."""
+def stop():
+    """The bridge holds only short queued turns; Kodi can change playback safely."""
 
-    if execute_builtin is None:
-        try:
-            import xbmc
-
-            execute_builtin = xbmc.executebuiltin
-        except Exception:
-            return False
-    if not callable(execute_builtin):
-        return False
-    try:
-        execute_builtin("NotifyAll(%s,STOP)" % TTS_NOTIFICATION_SENDER)
-    except Exception:
-        return False
     return True
 
 

@@ -25,7 +25,7 @@
       <news>1.0.10 — Kodi Lektor PL 0.9.0: OpenSubtitles.com z ponowieniem, licznik kredytów, koszt filmu i poprawna diagnostyka API.</news>
     </extension>
   </addon>
-  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="1.0.0" provider-name="KWPJ LABS">
+  <addon id="service.subtitle.tts.pl" name="Kodi Lektor PL" version="1.0.1" provider-name="KWPJ LABS">
     <requires>
       <import addon="xbmc.python" version="3.0.1"/>
     </requires>
@@ -36,9 +36,9 @@
     <extension point="xbmc.addon.metadata">
       <summary lang="pl_PL">Czyta na głos napisy filmu</summary>
       <summary lang="en_GB">Reads movie subtitles aloud</summary>
-      <description lang="pl_PL">Czyta polskie napisy filmu bez ElevenLabs i bez klucza API, wykorzystując darmowy głos usługi TTS zainstalowanej w Kodi lub na urządzeniu. Jednym przyciskiem ustawia OpenSubtitles.com jako źródło polskich napisów. Projekt KWPJ LABS.</description>
+      <description lang="pl_PL">Czyta polskie napisy filmu bez ElevenLabs i bez klucza API. Łączy się lokalnie z KWPJ Voice OS na tym samym telewizorze, który korzysta z polskiego głosu Androida. Jednym przyciskiem ustawia OpenSubtitles.com jako źródło polskich napisów. Projekt KWPJ LABS.</description>
       <description lang="en_GB">Reads Polish movie subtitles without ElevenLabs or an API key by using a free compatible TTS service installed in Kodi or on the device. It can configure OpenSubtitles.com as the Polish subtitle source. A KWPJ LABS project.</description>
-      <disclaimer lang="pl_PL">Dźwięk zależy od zgodnej usługi TTS i polskiego głosu zainstalowanego na urządzeniu. Dodatek nie pobiera ani nie przesyła tekstu do płatnej usługi mowy.</disclaimer>
+      <disclaimer lang="pl_PL">Wymaga uruchomionej aplikacji KWPJ Voice OS na tym samym telewizorze oraz polskiego głosu Androida. Dodatek nie pobiera ani nie przesyła tekstu do płatnej usługi mowy.</disclaimer>
       <assets>
         <icon>resources/icon.png</icon>
       </assets>
