@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
+from provider_factory import ProviderConfigurationError, usage_fetcher_for
 from usage import (
     SubscriptionUsage,
     UsageDataError,
@@ -49,6 +50,7 @@ class UsageJob:
     model_id: str = ""
     cues: tuple = ()
     prepare_text: object = field(default=None, repr=False, compare=False)
+    provider_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -239,7 +241,8 @@ class UsageWorker(threading.Thread):
                 )
                 if self._cancelled(job):
                     continue
-                subscription = self.fetcher(
+                fetcher = usage_fetcher_for(job.provider_id, self.fetcher)
+                subscription = fetcher(
                     job.api_key,
                     lambda: self._cancelled(job),
                 )
@@ -257,6 +260,16 @@ class UsageWorker(threading.Thread):
                 )
             except UsageCancelled:
                 continue
+            except ProviderConfigurationError as exc:
+                if not self._cancelled(job):
+                    self.results.put(
+                        UsageResult(
+                            job.generation,
+                            job.source_key,
+                            error_kind="unknown_provider",
+                            user_message=exc.user_message,
+                        )
+                    )
             except UsageFetchError as exc:
                 if not self._cancelled(job):
                     self.results.put(

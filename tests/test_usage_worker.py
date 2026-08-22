@@ -46,6 +46,7 @@ class UsageWorkerTests(unittest.TestCase):
             "eleven_flash_v2_5",
             (" Ala ", "[muzyka]", "ma kota"),
             lambda text: "" if text == "[muzyka]" else text.strip(),
+            provider_id="elevenlabs",
         )
         try:
             self.assertTrue(worker.submit(job))
@@ -78,7 +79,15 @@ class UsageWorkerTests(unittest.TestCase):
         try:
             self.assertTrue(
                 worker.submit(
-                    UsageJob(1, ("old.srt", 1, 1), "key", "model", ("tekst",), str)
+                    UsageJob(
+                        1,
+                        ("old.srt", 1, 1),
+                        "key",
+                        "model",
+                        ("tekst",),
+                        str,
+                        provider_id="elevenlabs",
+                    )
                 )
             )
             self.assertTrue(entered.wait(1.0))
@@ -90,6 +99,38 @@ class UsageWorkerTests(unittest.TestCase):
         finally:
             release.set()
             self._stop(worker)
+
+    def test_unknown_provider_never_calls_legacy_usage_endpoint(self):
+        calls = []
+
+        def fetcher(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {"character_count": 0, "character_limit": 100}
+
+        worker = UsageWorker(fetcher=fetcher)
+        worker.start()
+        worker.invalidate(4)
+        secret = "sekretny-klucz"
+        job = UsageJob(
+            4,
+            ("movie.srt", 1.0, 100),
+            secret,
+            "model",
+            ("Tekst",),
+            str,
+            provider_id="unknown-provider",
+        )
+        try:
+            self.assertTrue(worker.submit(job))
+            result = worker.results.get(timeout=2.0)
+        finally:
+            self._stop(worker)
+
+        self.assertEqual(calls, [])
+        self.assertEqual(result.error_kind, "unknown_provider")
+        self.assertIn("nieobsługiwanego dostawcę", result.user_message)
+        self.assertNotIn("unknown-provider", result.user_message)
+        self.assertNotIn(secret, repr(job))
 
     def test_missing_user_read_has_precise_safe_message(self):
         secret = "bardzo-sekretny-klucz"

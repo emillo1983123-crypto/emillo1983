@@ -1,3 +1,11 @@
+1.0.0 (2026-08-22)
+- Domyślny lektor nie korzysta z ElevenLabs, kredytów ani klucza API.
+- Dodano bezpieczne przekazywanie kwestii do darmowej, zgodnej usługi TTS zainstalowanej w Kodi/urządzeniu.
+- Dodano sprawdzenie obecności usługi TTS i czytelny komunikat zamiast pozornie działającego, cichego lektora.
+- Zatrzymanie, przewijanie lub zmiana filmu zatrzymują kolejkę darmowego lektora.
+- Automatyczne pobieranie polskich napisów przez skonfigurowany dodatek OpenSubtitles.com nie zależy już od żadnego klucza głosu.
+- Menu dodatku skupia się na teście darmowego głosu, konfiguracji OpenSubtitles.com i ustawieniach.
+
 0.9.0 (2026-08-11)
 - Naprawiono fałszywy komunikat o błędnym kluczu: brak uprawnień, limit, głos i model mają osobne objaśnienia.
 - Lista głosów korzysta z aktualnego, stronicowanego API ElevenLabs.

@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 import xml.etree.ElementTree as ET
+from unittest import mock
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,7 +69,7 @@ class _Settings:
         self.values[key] = bool(value)
 
     def getString(self, key):
-        return str(self.values.get(key, "classic"))
+        return str(self.values.get(key, ""))
 
     def getInt(self, key):
         return int(self.values.get(key, 95))
@@ -91,20 +92,108 @@ class _Addon:
         return "label-%s" % label_id
 
 
+class _Progress:
+    def __init__(self):
+        self.created = False
+        self.closed = False
+
+    def create(self, *_args):
+        self.created = True
+
+    def close(self):
+        self.closed = True
+
+
+class ProviderDispatchMenuTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = _load_default_module()
+
+    @staticmethod
+    def _addon():
+        addon = _Addon()
+        addon.settings.values.update(
+            {
+                "api_key": "secret",
+                "voice_id": "voice",
+                "model_id": "eleven_flash_v2_5",
+            }
+        )
+        addon.getAddonInfo = lambda _key: "profile"
+        addon.openSettings = lambda: None
+        return addon
+
+    def test_voice_test_dispatches_to_free_device_tts(self):
+        addon = self._addon()
+        calls = []
+        original_available = self.module.kodi_tts_available
+        original_deliver = self.module.deliver_kodi_tts
+        original_notify = self.module.notify
+        try:
+            self.module.kodi_tts_available = lambda: True
+            self.module.deliver_kodi_tts = lambda text: calls.append(text)
+            self.module.notify = lambda *args, **kwargs: None
+            self.assertTrue(self.module.test_voice(addon))
+        finally:
+            self.module.kodi_tts_available = original_available
+            self.module.deliver_kodi_tts = original_deliver
+            self.module.notify = original_notify
+
+        self.assertEqual(calls, ["Dzień dobry. Darmowy lektor napisów jest gotowy."])
+
+    def test_voice_choice_explains_that_tts_service_selects_the_voice(self):
+        addon = self._addon()
+        notices = []
+        original_notify = self.module.notify
+        try:
+            self.module.notify = lambda *args, **kwargs: notices.append(args)
+            self.assertFalse(self.module.choose_voice(addon))
+        finally:
+            self.module.notify = original_notify
+
+        self.assertEqual(len(notices), 1)
+        self.assertIn("usłudze TTS", notices[0][0])
+        self.assertNotIn("ElevenLabs", notices[0][0])
+
+    def test_unknown_provider_closes_progress_and_constructs_no_client(self):
+        addon = self._addon()
+        addon.settings.values["speech_provider"] = "unknown-provider"
+        progresses = []
+        notifications = []
+        original_progress = self.module.xbmcgui.DialogProgress
+        original_notify = self.module.notify
+        try:
+            self.module.xbmcgui.DialogProgress = lambda: (
+                progresses.append(_Progress()) or progresses[-1]
+            )
+            self.module.notify = lambda *args, **kwargs: notifications.append(args)
+            with mock.patch(
+                "provider_factory.ElevenLabsClient",
+                side_effect=AssertionError("client must not be constructed"),
+            ) as client_class:
+                self.module.test_voice(addon)
+                self.module.choose_voice(addon)
+                client_class.assert_not_called()
+        finally:
+            self.module.xbmcgui.DialogProgress = original_progress
+            self.module.notify = original_notify
+
+        self.assertEqual(len(progresses), 0)
+        self.assertEqual(len(notifications), 2)
+        self.assertTrue(notifications[0][-1])
+        self.assertFalse(notifications[1][-1])
+
+
 class VoiceProfileMenuTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.module = _load_default_module()
 
-    def test_profile_contract_matches_settings_and_speech_core(self):
-        from speech import VOICE_PROFILES
-
+    def test_free_provider_contract_matches_settings(self):
         settings = ET.parse(os.path.join(ADDON, "resources", "settings.xml"))
-        node = settings.find(".//setting[@id='voice_profile']")
+        node = settings.find(".//setting[@id='speech_provider']")
         option_keys = {option.text for option in node.findall("./constraints/options/option")}
-        menu_keys = {profile for profile, _label, _speed in self.module.VOICE_PROFILES}
-        self.assertEqual(menu_keys, option_keys)
-        self.assertEqual(menu_keys, set(VOICE_PROFILES))
+        self.assertEqual(option_keys, {"kodi_tts"})
 
     def test_new_setting_readers_preserve_valid_values_and_fall_back_safely(self):
         settings = _Settings()
@@ -331,74 +420,39 @@ class AccountUsageMenuTests(unittest.TestCase):
         self.assertIn("PAYG albo rozliczenie dodatkowe", report)
         self.assertNotIn("może zabraknąć", report)
 
-    def test_manual_usage_button_uses_account_endpoint_and_opens_report(self):
+    def test_manual_usage_action_reports_that_free_device_tts_has_no_credits(self):
         module = self.module
-        addon = _Addon()
-        addon.settings.values["api_key"] = "secret-value"
-        viewed = []
-        closed = []
-        originals = (
-            module.fetch_subscription,
-            module.estimate_current_film,
-            module.xbmcgui.DialogProgress,
-            module.xbmcgui.Dialog,
-        )
+        notices = []
+        original_notify = module.notify
         try:
-            module.fetch_subscription = lambda key: self._subscription()
-            module.estimate_current_film = lambda _addon: self._estimate()
-            module.xbmcgui.DialogProgress = lambda: types.SimpleNamespace(
-                create=lambda *args: None,
-                close=lambda: closed.append(True),
-            )
-            module.xbmcgui.Dialog = lambda: types.SimpleNamespace(
-                textviewer=lambda heading, body, usemono=False: viewed.append(
-                    (heading, body, usemono)
-                )
-            )
-            self.assertTrue(module.show_account_usage(addon))
+            module.notify = lambda *args, **kwargs: notices.append(args)
+            self.assertFalse(module.show_account_usage(_Addon()))
         finally:
-            (
-                module.fetch_subscription,
-                module.estimate_current_film,
-                module.xbmcgui.DialogProgress,
-                module.xbmcgui.Dialog,
-            ) = originals
+            module.notify = original_notify
 
-        self.assertEqual(closed, [True])
-        self.assertEqual(len(viewed), 1)
-        self.assertNotIn("secret-value", viewed[0][1])
-        self.assertIn("6 000", viewed[0][1])
+        self.assertEqual(len(notices), 1)
+        self.assertIn("nie ma kredytów", notices[0][0])
 
-    def test_top_up_never_collects_payment_data_and_opens_only_official_url(self):
+    def test_legacy_top_up_action_does_not_open_a_paid_service(self):
         module = self.module
         opened = []
-        prompts = []
         originals = (
-            module.xbmc.getCondVisibility,
             module.xbmc.executebuiltin,
-            module.xbmcgui.Dialog,
             module.notify,
         )
         try:
-            module.xbmc.getCondVisibility = lambda condition: condition == "System.Platform.Android"
             module.xbmc.executebuiltin = opened.append
-            module.xbmcgui.Dialog = lambda: types.SimpleNamespace(
-                yesno=lambda heading, message: prompts.append((heading, message)) or True
-            )
-            module.notify = lambda *args, **kwargs: None
-            self.assertTrue(module.open_elevenlabs_billing(_Addon()))
+            notices = []
+            module.notify = lambda *args, **kwargs: notices.append(args)
+            self.assertFalse(module.open_elevenlabs_billing(_Addon()))
         finally:
             (
-                module.xbmc.getCondVisibility,
                 module.xbmc.executebuiltin,
-                module.xbmcgui.Dialog,
                 module.notify,
             ) = originals
 
-        self.assertEqual(len(opened), 1)
-        self.assertIn("https://elevenlabs.io/app/developers", opened[0])
-        self.assertIn("nie przyjmuje kodów BLIK", prompts[0][1])
-        self.assertNotIn("api_key", opened[0].casefold())
+        self.assertEqual(opened, [])
+        self.assertIn("nie obsługuje płatności", notices[0][0])
 
 
 if __name__ == "__main__":

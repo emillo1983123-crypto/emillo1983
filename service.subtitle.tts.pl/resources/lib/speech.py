@@ -1,4 +1,9 @@
-"""ElevenLabs HTTP client producing Kodi-compatible WAV files."""
+"""Shared speech types plus the legacy ElevenLabs WAV client.
+
+The active free provider lives in :mod:`kodi_tts`; this module keeps the WAV
+client isolated for existing installations that explicitly choose the legacy
+provider during migration.
+"""
 
 from __future__ import unicode_literals
 
@@ -101,9 +106,13 @@ class SpeechCancelled(Exception):
 
 @dataclass(frozen=True)
 class SpeechResult:
-    path: str
-    duration: float
-    cached: bool
+    path: str = ""
+    duration: float = 0.0
+    cached: bool = False
+    # ``audio_file`` means Kodi must play ``path``.  ``kodi_tts`` means that
+    # the main service must hand ``text`` to the local TTS add-on instead.
+    delivery: str = "audio_file"
+    text: str = ""
 
 
 def _error_message(status, body):

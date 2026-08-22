@@ -85,6 +85,7 @@ class ReaderUsageRuntimeTests(unittest.TestCase):
         service.generation = 4
         service.usage_generation = 2
         service.config = {
+            "provider_id": "elevenlabs",
             "api_key": "secret",
             "model_id": "eleven_flash_v2_5",
             "family_mode": False,
@@ -101,6 +102,7 @@ class ReaderUsageRuntimeTests(unittest.TestCase):
     def test_api_model_and_text_policy_change_usage_signature_but_speed_does_not(self):
         base = {
             "enabled": True,
+            "provider_id": "elevenlabs",
             "api_key": "key-a",
             "model_id": "eleven_flash_v2_5",
             "family_mode": False,
@@ -110,6 +112,7 @@ class ReaderUsageRuntimeTests(unittest.TestCase):
         }
         signature = ReaderService._usage_config_signature(base)
         for changed in (
+            dict(base, provider_id="kwpj"),
             dict(base, api_key="key-b"),
             dict(base, model_id="eleven_multilingual_v2"),
             dict(base, family_mode=True),

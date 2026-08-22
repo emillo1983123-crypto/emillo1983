@@ -27,7 +27,15 @@ from auto_subtitles import (  # noqa: E402
     list_subtitle_modules,
 )
 from family_filter import soften  # noqa: E402
-from speech import ElevenLabsClient, SpeechError  # noqa: E402
+from kodi_tts import deliver as deliver_kodi_tts  # noqa: E402
+from kodi_tts import is_available as kodi_tts_available  # noqa: E402
+from provider_factory import (  # noqa: E402
+    ProviderConfigurationError,
+    configured_provider_id,
+    create_speech_provider,
+    usage_fetcher_for,
+)
+from speech import SpeechError  # noqa: E402
 from subtitle_source import SubtitleSource  # noqa: E402
 from text_normalizer import compress_for_economy, normalize_for_speech  # noqa: E402
 from usage import estimate_film_usage  # noqa: E402
@@ -71,67 +79,32 @@ def notify(message, error=False):
 
 
 def test_voice(addon):
-    settings = addon.getSettings()
-    key = settings.getString("api_key").strip()
-    if not key:
-        notify("Najpierw wpisz klucz API ElevenLabs w ustawieniach.", True)
-        addon.openSettings()
-        return
-    profile = xbmcvfs.translatePath(addon.getAddonInfo("profile"))
-    cache_dir = os.path.join(profile, "cache")
-    client = ElevenLabsClient(
-        api_key=key,
-        voice_id=settings.getString("voice_id").strip(),
-        model_id=settings.getString("model_id").strip(),
-        cache_dir=cache_dir,
-        speech_speed_percent=_safe_speech_speed(settings),
-        voice_profile=_safe_voice_profile(settings),
-    )
-    dialog = xbmcgui.DialogProgress()
-    dialog.create("Kodi Lektor PL", "Tworzę próbkę głosu…")
-    try:
-        result = client.synthesize(
-            "Dzień dobry. Lektor napisów działa prawidłowo.",
-            economy_mode=settings.getBool("economy_mode"),
+    del addon
+    if not kodi_tts_available():
+        notify(
+            "Nie znaleziono kompatybilnej usługi TTS. Otwórz pomoc dodatku i zainstaluj darmowy silnik mowy dla Kodi.",
+            True,
         )
-        dialog.close()
-        xbmc.playSFX(result.path, False)
-        notify("Odtwarzam próbkę. Jeśli jej nie słychać, wyłącz passthrough i ustaw dźwięki GUI na Zawsze.")
+        return False
+    try:
+        deliver_kodi_tts("Dzień dobry. Darmowy lektor napisów jest gotowy.")
+        notify("Wysłano próbkę do głosu urządzenia.")
+        return True
     except SpeechError as exc:
-        dialog.close()
         notify(exc.user_message, True)
-    except Exception:
-        dialog.close()
-        notify("Nie udało się utworzyć próbki. Sprawdź klucz, głos i połączenie z internetem.", True)
+        return False
+    except Exception as exc:
+        notify("Nie udało się uruchomić darmowego głosu: %s" % exc, True)
+        return False
 
 
 def choose_voice(addon):
-    settings = addon.getSettings()
-    key = settings.getString("api_key").strip()
-    if not key:
-        notify("Najpierw wpisz klucz API ElevenLabs.", True)
-        addon.openSettings()
-        return
-    dialog = xbmcgui.DialogProgress()
-    dialog.create("Kodi Lektor PL", "Pobieram listę głosów…")
-    try:
-        client = ElevenLabsClient(key, "", settings.getString("model_id"), "")
-        voices = client.list_voices()
-        dialog.close()
-        if not voices:
-            notify("ElevenLabs nie zwrócił dostępnych głosów.", True)
-            return
-        labels = ["%s%s" % (name, " — %s" % category if category else "") for name, voice_id, category in voices]
-        selected = xbmcgui.Dialog().select("Wybierz głos ElevenLabs", labels)
-        if selected >= 0:
-            settings.setString("voice_id", voices[selected][1])
-            notify("Wybrano głos: %s" % voices[selected][0])
-    except SpeechError as exc:
-        dialog.close()
-        notify(exc.user_message, True)
-    except Exception:
-        dialog.close()
-        notify("Nie udało się pobrać głosów. Sprawdź klucz API.", True)
+    del addon
+    notify(
+        "Polski głos wybiera się w usłudze TTS urządzenia. Ten dodatek nie używa listy głosów ani klucza API.",
+        False,
+    )
+    return False
 
 
 def choose_voice_profile(addon):
@@ -295,69 +268,15 @@ def format_usage_report(usage, estimate=None):
 
 
 def show_account_usage(addon):
-    settings = addon.getSettings()
-    key = settings.getString("api_key").strip()
-    if not key:
-        notify("Najpierw wpisz klucz API ElevenLabs.", True)
-        addon.openSettings()
-        return False
-    progress = xbmcgui.DialogProgress()
-    progress.create("Kodi Lektor PL", "Pobieram stan konta ElevenLabs…")
-    try:
-        usage = fetch_subscription(key)
-        estimate = estimate_current_film(addon)
-    except UsageFetchError as exc:
-        progress.close()
-        notify(exc.user_message, True)
-        return False
-    except Exception:
-        progress.close()
-        notify("Nie udało się pobrać stanu konta ElevenLabs.", True)
-        return False
-    progress.close()
-    xbmcgui.Dialog().textviewer(
-        addon.getLocalizedString(32222),
-        format_usage_report(usage, estimate),
-        usemono=False,
-    )
-    return True
+    del addon
+    notify("Darmowy głos urządzenia nie ma kredytów ani licznika użycia.")
+    return False
 
 
 def open_elevenlabs_billing(addon):
-    message = (
-        "Doładowanie i płatność odbywają się wyłącznie na oficjalnej stronie ElevenLabs. "
-        "Kodi Lektor PL nie przyjmuje kodów BLIK, danych karty ani haseł. Dostępne metody "
-        "płatności wybiera ElevenLabs. Otworzyć panel Developers → Top Up?\n\n%s"
-        % ELEVENLABS_DEVELOPERS_URL
-    )
-    if not xbmcgui.Dialog().yesno(addon.getLocalizedString(32223), message):
-        return False
-    try:
-        if xbmc.getCondVisibility("System.Platform.Android"):
-            xbmc.executebuiltin(
-                "StartAndroidActivity(com.android.chrome,android.intent.action.VIEW,,%s)"
-                % ELEVENLABS_DEVELOPERS_URL
-            )
-            notify(
-                "Wysłano adres do przeglądarki. Jeśli się nie otworzy, użyj: %s"
-                % ELEVENLABS_DEVELOPERS_URL,
-                False,
-                10000,
-            )
-        else:
-            xbmcgui.Dialog().textviewer(
-                "Oficjalne rozliczenia ElevenLabs",
-                "Otwórz ten adres w przeglądarce:\n\n%s" % ELEVENLABS_DEVELOPERS_URL,
-                usemono=False,
-            )
-        return True
-    except Exception:
-        xbmcgui.Dialog().textviewer(
-            "Oficjalne rozliczenia ElevenLabs",
-            "Otwórz ten adres w przeglądarce:\n\n%s" % ELEVENLABS_DEVELOPERS_URL,
-            usemono=False,
-        )
-        return False
+    del addon
+    notify("Ta wersja korzysta z darmowego głosu urządzenia i nie obsługuje płatności ElevenLabs.")
+    return False
 
 
 def configure_auto_subtitles(addon):
@@ -404,37 +323,26 @@ def configure_auto_subtitles(addon):
 def main():
     addon = xbmcaddon.Addon(ADDON_ID)
     choices = [
-        "Test głosu",
-        "Wybierz głos ElevenLabs",
-        addon.getLocalizedString(32027),
-        addon.getLocalizedString(32220),
-        addon.getLocalizedString(32221),
+        "Test darmowego głosu urządzenia",
         addon.getLocalizedString(32210),
-        addon.getLocalizedString(32200),
         "Ustawienia",
-        "Pomoc z dźwiękiem",
+        "Pomoc: darmowy lektor i napisy",
     ]
     selected = xbmcgui.Dialog().select("Kodi Lektor PL", choices)
     if selected == 0:
         test_voice(addon)
     elif selected == 1:
-        choose_voice(addon)
-    elif selected == 2:
-        choose_voice_profile(addon)
-    elif selected == 3:
-        show_account_usage(addon)
-    elif selected == 4:
-        open_elevenlabs_billing(addon)
-    elif selected == 5:
         configure_auto_subtitles(addon)
-    elif selected == 6:
-        show_api_key_help(addon)
-    elif selected == 7:
+    elif selected == 2:
         addon.openSettings()
-    elif selected == 8:
+    elif selected == 3:
         xbmcgui.Dialog().ok(
-            "Kodi Lektor PL — dźwięk",
-            "W Kodi otwórz Ustawienia → System → Dźwięk. Wyłącz przekazywanie dźwięku (passthrough) i ustaw „Odtwarzaj dźwięki GUI” na „Zawsze”. Lektor jest miksowany z filmem jako dźwięk WAV.",
+            "Kodi Lektor PL — darmowy tryb",
+            "1. W Kodi zainstaluj i włącz kompatybilną usługę TTS dla urządzenia.\n\n"
+            "2. W systemie telewizora wybierz polski głos jako domyślny głos TTS.\n\n"
+            "3. W tym menu wybierz „Ustaw OpenSubtitles.com dla polskich napisów”, a następnie zaloguj konto w ustawieniach tego dostawcy.\n\n"
+            "4. Włącz film. Dodatek odczytuje pobrany tekst napisów; nie korzysta z ElevenLabs ani z klucza API.\n\n"
+            "Jeżeli test nie mówi, usługa TTS nie jest zainstalowana lub nie jest zgodna z wersją Kodi.",
         )
 
 
